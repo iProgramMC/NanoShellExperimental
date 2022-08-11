@@ -1,0 +1,8 @@
+#ifndef _USERSPACE_SYSCALLS_H
+#define _USERSPACE_SYSCALLS_H
+
+enum {
+	LOGMSG = 1,
+};
+
+#endif//_USERSPACE_SYSCALLS_H

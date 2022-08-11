@@ -1,0 +1,23 @@
+Prefixes:
+
+Cb   - Clipboard, for global object storage
+Cc   - Internal NsScript executive
+Cfg  - Configuration manager
+Co   - Console
+Elf  - ELF Executive
+Ex   - Generic Executive
+Fat  - Internal FAT32 file system driver stuff
+Fs   - File System backend
+Fi   - File descriptor API
+Irq  - PIC Interrupt Request
+Isr  - Interrupt Service Request (exceptions)
+Kb   - Keyboard
+Ke   - Kernel
+Ki   - Kernel Initialization
+Mm   - Memory manager
+Pci  - PCI base driver
+St   - Storage Abstraction
+Tm   - Time
+Uart - UART/Serial port driver
+Vid  - Video subsystem
+Vmw  - VMware guest tools driver
