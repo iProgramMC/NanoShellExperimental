@@ -40,9 +40,38 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 	return NULL;
 }
 
+void MuKillPageTablesEntries(uint32_t* pPageTable)
+{
+	// Free each of the pages, if there are any
+	for (int i = 0; i < 0x400; i++)
+	{
+		if (pPageTable[i] & PAGE_BIT_PRESENT)
+		{
+			uint32_t frame = pPageTable[i] & PAGE_BIT_ADDRESS_MASK;
+			
+			MpClearFrame(frame);
+			
+			pPageTable[i] = 0;
+			
+			//TODO: Determine what page table this is so we can invalidate the page
+		}
+	}
+}
+
 void MuKillHeap(UserHeap* pHeap)
 {
+	// To kill the heap, first we need to empty all the page tables
+	for (int i = 0; i < 0x200; i++)
+	{
+		if (pHeap->m_pPageTables[i])
+		{
+			MuRemovePageTable(pHeap, i);
+		}
+	}
 	
+	// Should be good to go.  Free the page directory, and then the heap itself
+	MhFree(pHeap->m_pPageDirectory);
+	MhFree(pHeap);
 }
 
 void MuCreatePageTable(UserHeap *pHeap, int pageTable)
@@ -64,6 +93,7 @@ void MuRemovePageTable(UserHeap *pHeap, int pageTable)
 	if (pHeap->m_pPageTables[pageTable])
 	{
 		// TODO: ensure that there are no page entries
+		MuKillPageTablesEntries(pHeap->m_pPageTables[pageTable]);
 		
 		// reset it to zero
 		pHeap->m_pPageDirectory[pageTable] = 0;
@@ -318,19 +348,19 @@ bool MuMapMemoryNonFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, u
 // Maps a chunk a memory without a hint address.
 bool MuMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO)
 {
-	uintptr_t address;
+	void* address;
 	
 	bool bResult = MuMapMemoryNonFixedHint(pHeap, pHeap->m_nMappingHint, numPages, pPhysicalAddresses, &address, bReadWrite, bIsMMIO);
 	if (!bResult)
 		return false;
 	
 	// update the hint
-	pHeap->m_nMappingHint = address + PAGE_SIZE * numPages;
+	pHeap->m_nMappingHint = (uintptr_t)address + PAGE_SIZE * numPages;
 	
 	if (pHeap->m_nMappingHint >= KERNEL_HEAP_BASE)
 		pHeap->m_nMappingHint  = USER_HEAP_BASE;
 	
-	*pAddressOut = (void*)address;
+	*pAddressOut = address;
 	
 	return true;
 }

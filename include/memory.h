@@ -46,6 +46,7 @@ uint32_t MpFindFreeFrame();
 void MpSetFrame  (uint32_t frameAddr);
 void MpClearFrame(uint32_t frameAddr);
 void MpInitialize(multiboot_info_t* pInfo);
+int  MpGetNumFreePages();
 
 // Hardware
 void MmTlbInvalidate();
@@ -65,6 +66,7 @@ void MuUseHeap (UserHeap* pHeap);
 void MuResetHeap();
 
 UserHeap* MuCreateHeap();
+void MuKillHeap(UserHeap *pHeap);
 void MuCreatePageTable(UserHeap *pHeap, int pageTable);
 void MuRemovePageTable(UserHeap *pHeap, int pageTable);
 uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable);

@@ -139,6 +139,9 @@ void MuTest()
 	
 	MuResetHeap();
 	
+	MuKillHeap(pHeap);
+	pHeap = NULL;
+	
 	LogMsg("Hello I'm back!");
 }
 
@@ -174,11 +177,13 @@ void KeStartupSystem (unsigned long magic, unsigned long mbaddr)
 	LogMsg("NanoShell Experimental Operating System " VersionString);
 	LogMsg("[%d Kb System Memory, %d Kb Usable Memory]", nKbExtRam, g_numPagesAvailable * 4	);
 	
-	LogMsg("There are %d pages available to the system.", g_numPagesAvailable);
+	LogMsg("There are %d pages available to the system, %d of which are still free.", g_numPagesAvailable, MpGetNumFreePages());
 	
 	MhTest();
 	
 	MuTest();
+	
+	LogMsg("There are now %d pages available to the system.", MpGetNumFreePages());
 	
 	FreeTypeThing();
 	
