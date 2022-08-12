@@ -32,13 +32,33 @@
 #include <main.h>
 #include <multiboot.h>
 
-// User heap structure
 typedef struct
 {
+	void * m_pAddr;
+	size_t m_nPages;
+}
+UserHeapAlloc;
+
+// User heap structure
+typedef struct UserHeap
+{
+	int        m_nRefCount;        // The reference count. If it goes to zero, this gets killed
+	
 	uint32_t*  m_pPageDirectory;   // The virtual  address of the page directory
 	uint32_t   m_nPageDirectory;   // The physical address of the page directory
 	uint32_t*  m_pPageTables[512]; // The user half's page tables referenced by the page directory.
 	uint32_t   m_nMappingHint;     // The hint to use when mapping with no hint next.
+	
+	// This is a dynamic array storing all the allocations that have been added using
+	// operations such as MuMapMemory. When it's time to MuUnMap(pAddr), unmap it all,
+	// not just one page.
+	UserHeapAlloc*    m_pAllocations;
+	
+	// You can only clone a user heap from one parent.
+	// When a clone operation is performed, the reference count of the cloned heap
+	// is increased. Even if the cloned heap gets 'killed' later, it actually doesn't,
+	// it lives on until all the things that have cloned it die off too.
+	struct UserHeap* m_pUserHeapParent;
 }
 UserHeap;
 
@@ -68,6 +88,7 @@ void MuResetHeap();
 
 UserHeap* MuCreateHeap();
 UserHeap* MuGetCurrentHeap();
+UserHeap* MuCloneHeap(UserHeap* pHeapToClone);
 void MuKillHeap(UserHeap *pHeap);
 void MuCreatePageTable(UserHeap *pHeap, int pageTable);
 void MuRemovePageTable(UserHeap *pHeap, int pageTable);

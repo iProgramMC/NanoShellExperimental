@@ -25,9 +25,13 @@ UserHeap* MuCreateHeap()
 {
 	UserHeap *pHeap = MhAllocate(sizeof(UserHeap), NULL);
 	
-	pHeap->m_nPageDirectory = 0;
-	pHeap->m_nMappingHint   = USER_HEAP_BASE;
-	pHeap->m_pPageDirectory = MhAllocateSinglePage(&pHeap->m_nPageDirectory);
+	pHeap->m_nRefCount       = 1; // One reference. When this heap gets cloned, its reference count is increased.
+	pHeap->m_nPageDirectory  = 0;
+	pHeap->m_nMappingHint    = USER_HEAP_BASE;
+	pHeap->m_pPageDirectory  = MhAllocateSinglePage(&pHeap->m_nPageDirectory);
+	pHeap->m_pAllocations    = NULL;
+	pHeap->m_pUserHeapParent = NULL;
+	
 	memset(pHeap->m_pPageDirectory, 0, PAGE_SIZE);
 	
 	// Copy the latter half from the kernel heap.
@@ -41,8 +45,48 @@ UserHeap* MuCreateHeap()
 
 UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 {
-	//TODO. In order to do this efficiently, I think we should add COW first
-	return NULL;
+	UserHeap *pHeap = MuCreateHeap();
+	
+	pHeapToClone->m_nRefCount++;
+	pHeap->m_pUserHeapParent = pHeapToClone;
+	
+	// Clone each page table
+	for (int i = 0x000; i < 0x200; i++)
+	{
+		if (pHeapToClone->m_pPageTables[i])
+		{
+			MuCreatePageTable(pHeap, i);
+			
+			for (int entry = 0x000; entry < 0x400; entry++)
+			{
+				uint32_t* pEntryDst = MuGetPageEntryAt(pHeap,        i << 22 | entry << 12, true);
+				uint32_t* pEntrySrc = MuGetPageEntryAt(pHeapToClone, i << 22 | entry << 12, true);
+				
+				if (*pEntrySrc & PAGE_BIT_PRESENT)
+				{
+					//We don't have a way to track the reference count of individual pages.
+					//So when the parent gets killed, the children will be working with a
+					//freed page, which could potentially be overwritten, and uh oh.
+					
+					//This is fixed by keeping the parent alive until all the children have been killed too
+					
+					//ensure that the bit is clear
+					*pEntryDst &= ~PAGE_BIT_READWRITE;
+					
+					//use the same physical page as the source
+					*pEntryDst = (*pEntrySrc & PAGE_BIT_ADDRESS_MASK) | PAGE_BIT_PRESENT;
+					
+					//if it's read-write, set the COW bit
+					if (*pEntrySrc & PAGE_BIT_READWRITE)
+					{
+						*pEntryDst |= PAGE_BIT_COW;
+					}
+				}
+			}
+		}
+	}
+	
+	return pHeap;
 }
 
 void MuKillPageTablesEntries(uint32_t* pPageTable)
@@ -65,20 +109,38 @@ void MuKillPageTablesEntries(uint32_t* pPageTable)
 
 void MuKillHeap(UserHeap* pHeap)
 {
-	// TODO: Force copy on write on heaps that have been cloned from here
-	
-	// To kill the heap, first we need to empty all the page tables
-	for (int i = 0; i < 0x200; i++)
+	pHeap->m_nRefCount--;
+	if (pHeap->m_nRefCount < 0)
 	{
-		if (pHeap->m_pPageTables[i])
-		{
-			MuRemovePageTable(pHeap, i);
-		}
+		// Uh oh
+		LogMsg("Heap %p has reference count %d, uh oh", pHeap, pHeap->m_nRefCount);
+		KeStopSystem();
 	}
 	
-	// Should be good to go.  Free the page directory, and then the heap itself
-	MhFree(pHeap->m_pPageDirectory);
-	MhFree(pHeap);
+	if (pHeap->m_nRefCount == 0)
+	{
+		LogMsg("Heap %p will be killed off now.", pHeap);
+		// To kill the heap, first we need to empty all the page tables
+		for (int i = 0; i < 0x200; i++)
+		{
+			if (pHeap->m_pPageTables[i])
+			{
+				MuRemovePageTable(pHeap, i);
+			}
+		}
+		
+		// Kill off the parent as well, if needed
+		if (pHeap->m_pUserHeapParent)
+			MuKillHeap(pHeap->m_pUserHeapParent);
+		
+		// Should be good to go.  Free the page directory, and then the heap itself
+		MhFree(pHeap->m_pPageDirectory);
+		MhFree(pHeap);
+	}
+	else
+	{
+		LogMsg("Heap %p won't die yet, because it's reference count is %d!", pHeap, pHeap->m_nRefCount);
+	}
 }
 
 void MuCreatePageTable(UserHeap *pHeap, int pageTable)
@@ -395,6 +457,8 @@ void MuUseHeap (UserHeap* pHeap)
 		MuResetHeap();
 	
 	g_pCurrentUserHeap = pHeap;
+	
+	if (!pHeap) return;
 	
 	MmUsePageDirectory((uintptr_t)pHeap->m_nPageDirectory);
 }

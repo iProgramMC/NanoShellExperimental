@@ -137,10 +137,25 @@ void MuTest()
 		LogMsg("Done. Any errors? Don't think so.");
 	}
 	
+	// Clone the heap.
+	UserHeap *pNewHeap = MuCloneHeap(pHeap);
+	
+	MuUseHeap(pNewHeap);
+	
+	// Write to pMemory
+	*((uint32_t*)pMemory) = 0xCAFEBABE;
+	LogMsg("Wrote to pMemory=%p on heap %p: %x %x", pMemory, pNewHeap, *((uint32_t*)pMemory), *((uint32_t*)pMemory + 1));
+	
+	MuUseHeap(pHeap);
+	
+	LogMsg("On old heap it is %x %x", *((uint32_t*)pMemory), *((uint32_t*)pMemory + 1));
+	
 	MuResetHeap();
 	
 	MuKillHeap(pHeap);
+	MuKillHeap(pNewHeap);
 	pHeap = NULL;
+	pNewHeap = NULL;
 	
 	LogMsg("Hello I'm back!");
 }
@@ -183,7 +198,7 @@ void KeStartupSystem (unsigned long magic, unsigned long mbaddr)
 	
 	MuTest();
 	
-	LogMsg("There are now %d pages available to the system.", MpGetNumFreePages());
+	LogMsg("There are now %d / %d pages available to the system.", MpGetNumFreePages(), g_numPagesAvailable);
 	
 	FreeTypeThing();
 	

@@ -64,7 +64,7 @@ void MmOnPageFault(Registers *pRegs)
 		
 		if (*pPageEntry & PAGE_BIT_DAI)
 		{
-			LogMsg("Page not present, allocating...");
+			//LogMsg("Page not present, allocating...");
 			
 			// It's time to map a page here
 			uint32_t frame = MpFindFreeFrame();
@@ -84,7 +84,7 @@ void MmOnPageFault(Registers *pRegs)
 			
 			MmInvalidateSinglePage(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK);
 			
-			// Let's go, I guess?
+			// Let's go!
 			return;
 		}
 		
@@ -92,7 +92,7 @@ void MmOnPageFault(Registers *pRegs)
 		goto _INVALID_PAGE_FAULT;
 	}
 	
-	if (!errorCode.bWrite)
+	if (errorCode.bWrite)
 	{
 		// Should be a COW field. Was present...
 		uint32_t* pPageEntry = MuGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
@@ -104,8 +104,6 @@ void MmOnPageFault(Registers *pRegs)
 		
 		if (*pPageEntry & PAGE_BIT_COW)
 		{
-			LogMsg("Page supposed to be copied on write, allocating...");
-			
 			// It's show time...
 			uint32_t frame = MpFindFreeFrame();
 			
@@ -115,17 +113,28 @@ void MmOnPageFault(Registers *pRegs)
 				goto _INVALID_PAGE_FAULT;
 			}
 			
+			LogMsg("Page supposed to be copied on write, allocated frame %x", frame<<12);
 			MpSetFrame(frame << 12);
+			
+			uint8_t data[PAGE_SIZE];
+			memcpy(data, (void*)(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK), PAGE_SIZE);
 			
 			*pPageEntry = *pPageEntry & 0xFFF;
 			*pPageEntry |= frame << 12;
 			*pPageEntry |= PAGE_BIT_READWRITE;
 			*pPageEntry &= ~PAGE_BIT_COW;
+			
+			MmInvalidateSinglePage(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK); // Refresh
+			
+			memcpy ((void*)(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK), data, PAGE_SIZE);
+			
+			// Go!
+			return;
 		}
 	}
 	
 _INVALID_PAGE_FAULT:
-	LogMsg("Invalid page fault");
+	LogMsg("Invalid page fault at EIP: %x", pRegs->eip);
 	KeStopSystem();
 }
 

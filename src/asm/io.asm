@@ -223,6 +223,91 @@ loc_8000087:                            ; CODE XREF: .text:08000008↑j
 	pop     ebx
 	retn
 
+; It didn't used to need this, now it does!?
+global __umoddi3
+__umoddi3:
+                push    ebx
+                mov     ebx, [esp+14h]
+                bsr     ecx, ebx
+                jz      loc_8000196
+                mov     eax, [esp+10h]
+                shr     eax, cl
+                shr     eax, 1
+                not     ecx
+                shl     ebx, cl
+                or      ebx, eax
+                mov     edx, [esp+0Ch]
+                mov     eax, [esp+8]
+                cmp     edx, ebx
+                jnb     short loc_800015A
+                div     ebx
+                push    edi
+                not     ecx
+                shr     eax, 1
+                shr     eax, cl
+                mov     edi, eax
+                mul     dword [esp+14h]
+                mov     ebx, [esp+0Ch]
+                mov     ecx, [esp+10h]
+                sub     ebx, eax
+                sbb     ecx, edx
+                mov     eax, [esp+18h]
+                imul    eax, edi
+                sub     ecx, eax
+                jnb     short loc_8000153
+                add     ebx, [esp+14h]
+                adc     ecx, [esp+18h]
+
+loc_8000153:                            ; CODE XREF: .text:08000149↑j
+                mov     eax, ebx
+                mov     edx, ecx
+                pop     edi
+                pop     ebx
+                retn
+; ---------------------------------------------------------------------------
+
+loc_800015A:                            ; CODE XREF: .text:08000123↑j
+                sub     edx, ebx
+                div     ebx
+                push    edi
+                not     ecx
+                shr     eax, 1
+                or      eax, 80000000h
+                shr     eax, cl
+                mov     edi, eax
+                mul     dword [esp+14h]
+                mov     ebx, [esp+0Ch]
+                mov     ecx, [esp+10h]
+                sub     ebx, eax
+                sbb     ecx, edx
+                mov     eax, [esp+18h]
+                imul    eax, edi
+                sub     ecx, eax
+                jnb     short loc_800018F
+                add     ebx, [esp+14h]
+                adc     ecx, [esp+18h]
+
+loc_800018F:                            ; CODE XREF: .text:08000185↑j
+                mov     eax, ebx
+                mov     edx, ecx
+                pop     edi
+                pop     ebx
+                retn
+; ---------------------------------------------------------------------------
+
+loc_8000196:                            ; CODE XREF: .text:08000105↑j
+                mov     eax, [esp+0Ch]
+                mov     ecx, [esp+10h]
+                xor     edx, edx
+                div     ecx
+                mov     ebx, eax
+                mov     eax, [esp+8]
+                div     ecx
+                mov     eax, edx
+                pop     ebx
+                xor     edx, edx
+                retn
+
 extern _kernel_end
 global MmStartupStuff
 MmStartupStuff:
