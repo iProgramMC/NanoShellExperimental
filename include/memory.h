@@ -1,3 +1,12 @@
+//  ***************************************************************
+//  memory.h - Creation date: 11/08/2022
+//  -------------------------------------------------------------
+//  NanoShell Copyright (C) 2022 - Licensed under GPL V3
+//
+//  ***************************************************************
+//  Programmer(s):  iProgramInCpp (iprogramincpp@gmail.com)
+//  ***************************************************************
+
 #ifndef _MEMORY_H
 #define _MEMORY_H
 
@@ -13,10 +22,24 @@
 #define PAGE_BIT_CACHEDISABLE (0x10)
 #define PAGE_BIT_ACCESSED     (0x20)
 
+// Page bits that the kernel uses, and are marked as 'available' by the spec
+#define PAGE_BIT_MMIO         (0x800) // (1 << 11). If this is MMIO, set this bit to let the kernel know that this shouldn't be unmapped
+#define PAGE_BIT_COW          (0x400) // (1 << 10). If a fault occurs here, copy the specified page. Not used as of 12/08/2022
+
 #define PAGE_BIT_ADDRESS_MASK (0xFFFFF000)
 
 #include <main.h>
 #include <multiboot.h>
+
+// User heap structure
+typedef struct
+{
+	uint32_t*  m_pPageDirectory;   // The virtual  address of the page directory
+	uint32_t   m_nPageDirectory;   // The physical address of the page directory
+	uint32_t*  m_pPageTables[512]; // The user half's page tables referenced by the page directory.
+	uint32_t   m_nMappingHint;     // The hint to use when mapping with no hint next.
+}
+UserHeap;
 
 // Physical memory manager
 uint32_t MpFindFreeFrame();
@@ -24,11 +47,33 @@ void MpSetFrame  (uint32_t frameAddr);
 void MpClearFrame(uint32_t frameAddr);
 void MpInitialize(multiboot_info_t* pInfo);
 
-// Kernel heap
+// Hardware
+void MmTlbInvalidate();
+void MmUsePageDirectory(uintptr_t pageDir);   //unsafe!! This is exposed just so that other memory code can use it.
+void MmInvalidateSinglePage(uintptr_t add);
 
+// Kernel heap
+void* MhAllocate(size_t size, uint32_t* pPhysOut);
+void* MhReAllocate(void *oldPtr, size_t newSize);
 void* MhAllocateSinglePage(uint32_t* pPhysOut);
 void  MhFreePage(void* pPage);
 void  MhFree(void* pPage);
 void  MhInitialize();
+
+// User heap manager
+void MuUseHeap (UserHeap* pHeap);
+void MuResetHeap();
+
+UserHeap* MuCreateHeap();
+void MuCreatePageTable(UserHeap *pHeap, int pageTable);
+void MuRemovePageTable(UserHeap *pHeap, int pageTable);
+uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable);
+bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, bool bReadWrite);
+bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address);
+bool MuAreMappingParmsValid(uintptr_t start, size_t nPages);
+bool MuIsMappingFree(UserHeap *pHeap, uintptr_t start, size_t nPages);
+bool MuMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO);
+bool MuMapMemoryNonFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO);
+bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, bool bReadWrite, bool bAllowClobbering, bool bIsMMIO);
 
 #endif//_MEMORY_H

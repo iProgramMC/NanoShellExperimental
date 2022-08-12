@@ -10,6 +10,7 @@
 // Namespace: Mh (Memory manager, kernel Heap)
 
 #include <memory.h>
+#include <string.h>
 
 // Can allocate up to 256 MB of RAM.  No need for more I think,
 // but if there is a need, just increase this. Recommend a Power of 2
@@ -35,6 +36,11 @@ uint32_t* g_KernelPageDirectoryVirtual [PAGE_SIZE / sizeof(uint32_t)];
 void MmTlbInvalidate()
 {
 	__asm__ volatile ("movl %%cr3, %%ecx\n\tmovl %%ecx, %%cr3\n\t":::"cx");
+}
+
+void MmUsePageDirectory(uintptr_t pageDir)
+{
+	__asm__ volatile ("mov %0, %%cr3"::"r"((uint32_t*)pageDir));
 }
 
 void MmInvalidateSinglePage(uintptr_t add)
@@ -69,6 +75,7 @@ void* MhSetupPage(int index, uint32_t* pPhysOut)
 	if (frame == 0xFFFFFFFFu)
 	{
 		// Out of memory.
+		LogMsg("Out of memory in MhSetupPage");
 		return NULL;
 	}
 	
@@ -141,4 +148,149 @@ void MhFree(void* pPage)
 		pAddr += PAGE_SIZE;
 	}
 }
-
+void* MhAllocate(size_t size, uint32_t* pPhysOut)
+{
+	if (size <= PAGE_SIZE)
+	{
+		return MhAllocateSinglePage(pPhysOut);
+	}
+	else
+	{
+		//more than one page, take matters into our own hands:
+		int numPagesNeeded = ((size - 1) >> 12) + 1;
+		//ex: if we wanted 6100 bytes, we'd take 6100-1=6099, then divide that by 4096 (we get 1) and add 1
+		//    if we wanted 8192 bytes, we'd take 8192-1=8191, then divide that by 4096 (we get 1) and add 1 to get 2 pages
+		
+		for (int i = 0; i < C_MAX_KERNEL_HEAP_PAGE_ENTRIES; i++)
+		{
+			// A non-allocated pageframe?
+			if (!(g_KernelPageEntries[i] & PAGE_BIT_PRESENT))
+			{
+				// Yes.  Are there at least numPagesNeeded holes?
+				int jfinal = i + numPagesNeeded;
+				for (int j = i; j < jfinal; j++)
+				{
+					//Are there any already taken pages before we reach the end.
+					if (g_KernelPageEntries[j] & PAGE_BIT_PRESENT)
+					{
+						//Yes.  This hole isn't large enough.
+						i = j;
+						goto _label_continue;
+					}
+				}
+				// Nope! We have space here!  Let's map all the pages, and return the address of the first one.
+				LogMsg("Setting up page number %d", i);
+				void* pointer = MhSetupPage(i, pPhysOut);
+				
+				// Not to forget, set the memory allocation size below:
+				g_KernelHeapAllocSize[i] = numPagesNeeded - 1;
+				
+				for (int j = i + 1, k = 1; j < jfinal; j++, k++)
+				{
+					LogMsg("Setting up page number %d", j);
+					uint32_t* pPhysOutNew = pPhysOut;
+					if (pPhysOutNew)
+						pPhysOutNew += k;
+					MhSetupPage (j, pPhysOutNew);
+				}
+				
+				return pointer;
+			}
+		_label_continue:;
+		}
+		
+		//no continuous addressed pages are left. :^(
+		return NULL;
+	}
+}
+void* MhReAllocate(void *oldPtr, size_t newSize)
+{
+	// step 1: If the pointer is null, just allocate a new array of size `size`.
+	if (!oldPtr)
+		return MhAllocate(newSize, NULL);
+	
+	// step 2: get the first page's number
+	uint32_t pAddr = (uint32_t)oldPtr;
+	
+	uint32_t index = (pAddr - KERNEL_HEAP_BASE) >> 12;
+	
+	// step 3: figure out the old size of this block.
+	int* pSubsequentAllocs = &g_KernelHeapAllocSize[index];
+	
+	size_t oldSize = PAGE_SIZE * (*pSubsequentAllocs + 1);
+	
+	// If the provided size is smaller, return the same block, but shrunk.
+	if (oldSize >= newSize)
+	{
+		size_t numPagesNeeded =  ((newSize - 1) >> 12) + 1;
+		
+		int oldPages = *pSubsequentAllocs  + 1;
+		*pSubsequentAllocs = numPagesNeeded - 1;
+		
+		// where freeing pages starts:
+		uint8_t* addr = (uint8_t*)oldPtr + numPagesNeeded * PAGE_SIZE;
+		
+		for (int i = numPagesNeeded; i < oldPages; i++)
+		{
+			MhFreePage(addr);
+			addr += PAGE_SIZE;
+		}
+		
+		return oldPtr;
+	}
+	else
+	{
+		// Check if there are this many free blocks available at all.
+		size_t numPagesNeeded =  ((newSize - 1) >> 12) + 1;
+		int oldPages = *pSubsequentAllocs  + 1;
+		
+		bool spaceAvailable = true;
+		
+		for (size_t i = oldPages; i < numPagesNeeded; i++)
+		{
+			if (g_KernelPageEntries[index + i] & PAGE_BIT_PRESENT)
+			{
+				spaceAvailable = false;
+				break;
+			}
+		}
+		
+		if (spaceAvailable)
+		{
+			// Proceed with the expansion.
+			
+			for (size_t i = oldPages; i < numPagesNeeded; i++)
+			{
+				void *ptr = MhSetupPage (index + i, NULL);
+				
+				// if not null, increment by 4.
+				if (!ptr)
+				{
+					// All, hell naw
+					//TODO: rollback
+					ASSERT(!"TODO: Roll back from failed MmReAllocate?");
+					return NULL;
+				}
+			}
+			
+			*pSubsequentAllocs = numPagesNeeded - 1;
+			
+			return oldPtr;
+		}
+	}
+	
+	// If nothing else works, just allocate and memcpy().
+	
+	void* newPtr = MhAllocate(newSize, NULL);
+	if (!newPtr)
+		return NULL;
+	
+	size_t minSize = newSize;
+	if (minSize > oldSize)
+		minSize = oldSize;
+	memcpy(newPtr, oldPtr, minSize);
+	
+	MhFree(oldPtr);
+	
+	return newPtr;
+}
