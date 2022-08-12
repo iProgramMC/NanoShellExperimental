@@ -6,7 +6,9 @@ NanoShell is a 32-bit operating system.
 This software is licensed under the GNU General Public License version 3.
 
 ## Implemented features
+
 ### Basic memory manager
+
 [x] Kernel heap
 [x] User heaps, able to be switched to at any time
 [x] Allow mapping of any memory anywhere 
