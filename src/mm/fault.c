@@ -10,10 +10,14 @@
 // Namespace: Mf (Memory manager, page Fault)
 
 #include <memory.h>
-#include <idt.h>
+#include <string.h>
 
 int g_nPageFaultsSoFar = 0;//just for statistics
 
+int MmGetNumPageFaults()
+{
+	return g_nPageFaultsSoFar;
+}
 
 void MmOnPageFault(Registers *pRegs)
 {
@@ -21,7 +25,7 @@ void MmOnPageFault(Registers *pRegs)
 	
 	UserHeap *pHeap = MuGetCurrentHeap();
 	
-	LogMsg("Page fault happened at %x (error code: %x) on Heap %p", pRegs->cr2, pRegs->error_code, pHeap);
+	//LogMsg("Page fault happened at %x (error code: %x) on Heap %p", pRegs->cr2, pRegs->error_code, pHeap);
 	
 	if (!pHeap)
 	{
@@ -113,7 +117,7 @@ void MmOnPageFault(Registers *pRegs)
 				goto _INVALID_PAGE_FAULT;
 			}
 			
-			LogMsg("Page supposed to be copied on write, allocated frame %x", frame<<12);
+			//LogMsg("Page supposed to be copied on write, allocated frame %x", frame<<12);
 			MpSetFrame(frame << 12);
 			
 			uint8_t data[PAGE_SIZE];

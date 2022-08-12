@@ -6,7 +6,14 @@ NanoShell is a 32-bit operating system.
 This software is licensed under the GNU General Public License version 3.
 
 ## Implemented features
-* Basic memory manager.
+### Basic memory manager
+[x] Kernel heap
+[x] User heaps, able to be switched to at any time
+[x] Allow mapping of any memory anywhere 
+[x] Demand paging (use faults to generate pages on the fly rather than generating them instantly)
+[x] Copy-on-write when cloning (will be useful for `fork` later)
+[ ] Unmapping of memory areas
+[ ] Port to the actual NanoShell operating system itself
 
 ## Build instructions
 

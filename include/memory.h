@@ -31,6 +31,7 @@
 
 #include <main.h>
 #include <multiboot.h>
+#include <idt.h>
 
 typedef struct
 {
@@ -73,6 +74,8 @@ int  MpGetNumFreePages();
 void MmTlbInvalidate();
 void MmUsePageDirectory(uintptr_t pageDir);   //unsafe!! This is exposed just so that other memory code can use it.
 void MmInvalidateSinglePage(uintptr_t add);
+void MmOnPageFault(Registers* pRegs);
+int  MmGetNumPageFaults();
 
 // Kernel heap
 void* MhAllocate(size_t size, uint32_t* pPhysOut);

@@ -198,7 +198,8 @@ void KeStartupSystem (unsigned long magic, unsigned long mbaddr)
 	
 	MuTest();
 	
-	LogMsg("There are now %d / %d pages available to the system.", MpGetNumFreePages(), g_numPagesAvailable);
+	LogMsg("There are now %d out of %d pages available to the system.", MpGetNumFreePages(), g_numPagesAvailable);
+	LogMsg("We have faulted %d times.", MmGetNumPageFaults());
 	
 	FreeTypeThing();
 	
