@@ -24,7 +24,8 @@
 
 // Page bits that the kernel uses, and are marked as 'available' by the spec
 #define PAGE_BIT_MMIO         (0x800) // (1 << 11). If this is MMIO, set this bit to let the kernel know that this shouldn't be unmapped
-#define PAGE_BIT_COW          (0x400) // (1 << 10). If a fault occurs here, copy the specified page. Not used as of 12/08/2022
+#define PAGE_BIT_COW          (0x400) // (1 << 10). Copy On Write. If a fault occurs here, copy the specified page.
+#define PAGE_BIT_DAI          (0x200) // (1 <<  9). Don't Allocate Instantly. If a fault occurs here, allocate a physical page.
 
 #define PAGE_BIT_ADDRESS_MASK (0xFFFFF000)
 
@@ -66,6 +67,7 @@ void MuUseHeap (UserHeap* pHeap);
 void MuResetHeap();
 
 UserHeap* MuCreateHeap();
+UserHeap* MuGetCurrentHeap();
 void MuKillHeap(UserHeap *pHeap);
 void MuCreatePageTable(UserHeap *pHeap, int pageTable);
 void MuRemovePageTable(UserHeap *pHeap, int pageTable);

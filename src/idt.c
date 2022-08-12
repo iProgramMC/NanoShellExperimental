@@ -46,28 +46,8 @@ void SetupExceptionInterrupt (int intNum, void* isrHandler)
 	pEntry->type_attr = INTGATE;
 	pEntry->selector = KECODESEG;
 }
-#ifdef HAS_EXCEPTION_HANDLERS
-void ISRCommon(int lol) {
-	LogMsg("Got exception: %d", lol);
-	PANICR("got exception: ");
-}
-void ISR00() {ISRCommon(0x00);}
-void ISR01() {ISRCommon(0x01);}
-void ISR02() {ISRCommon(0x02);}
-void ISR03() {ISRCommon(0x03);}
-void ISR04() {ISRCommon(0x04);}
-void ISR05() {ISRCommon(0x05);}
-void ISR06() {ISRCommon(0x06);}
-void ISR07() {ISRCommon(0x07);}
-void ISR08() {ISRCommon(0x08);}
-void ISR09() {ISRCommon(0x09);}
-void ISR0A() {ISRCommon(0x0A);}
-void ISR0B() {ISRCommon(0x0B);}
-void ISR0C() {ISRCommon(0x0C);}
-void ISR0D() {ISRCommon(0x0D);}
-void ISR0E() {ISRCommon(0x0E);}
-void ISR0F() {ISRCommon(0x0F);}
-#endif
+
+void IsrStub14();
 
 void KeTimerInit() 
 {
@@ -108,24 +88,7 @@ void KeIdtInit()
 	SetupInterrupt (&mask1, &mask2, 0x1, IrqKeyboardA);
 	SetupInterrupt (&mask1, &mask2, 0x2, NULL); // IRQ2: Cascade. Never triggered
 	
-#ifdef HAS_EXCEPTION_HANDLERS
-	SetupExceptionInterrupt (0x00, ISR00);
-	SetupExceptionInterrupt (0x01, ISR01);
-	SetupExceptionInterrupt (0x02, ISR02);
-	SetupExceptionInterrupt (0x03, ISR03);
-	SetupExceptionInterrupt (0x04, ISR04);
-	SetupExceptionInterrupt (0x05, ISR05);
-	SetupExceptionInterrupt (0x06, ISR06);
-	SetupExceptionInterrupt (0x07, ISR07);
-	SetupExceptionInterrupt (0x08, ISR08);
-	SetupExceptionInterrupt (0x09, ISR09);
-	SetupExceptionInterrupt (0x0A, ISR0A);
-	SetupExceptionInterrupt (0x0B, ISR0B);
-	SetupExceptionInterrupt (0x0C, ISR0C);
-	SetupExceptionInterrupt (0x0D, ISR0D);
-	SetupExceptionInterrupt (0x0E, ISR0E);
-	SetupExceptionInterrupt (0x0F, ISR0F);
-#endif
+	SetupExceptionInterrupt (0x0E, IsrStub14);
 	
 	SetupSoftInterrupt (0x80, OnSyscallReceivedA);
 	

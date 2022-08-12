@@ -41,4 +41,18 @@ OnSyscallReceivedA:
 	sti
 	iretd
 	
+; Special handler for interrupt 0xE (page fault)
+global IsrStub14
+extern MmOnPageFault
+IsrStub14:
+	; the error code has already been pushed
+	pusha                         ; back up all registers
+	mov eax, cr2                  ; push cr2 (the faulting address), to complete the 'registers' struct
+	push eax
+	push esp                      ; push esp - a pointer to the registers* struct
+	call MmOnPageFault            ; call the page fault handler
+	add  esp, 8                   ; pop away esp and cr2
+	popa                          ; restore the registers, then return from the page fault
+	add  esp, 4                   ; pop away the error code
+	iretd
 	

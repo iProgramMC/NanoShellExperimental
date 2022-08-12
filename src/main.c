@@ -121,9 +121,9 @@ void MuTest()
 	//MuMapMemoryFixedHint(pHeap, (uintptr_t)pMemory, 8, NULL, true, false, false);
 	
 	//map some things for an attempt
-	MuMapMemory(pHeap, 423, NULL, &pMemory, true, false);
-	MuMapMemory(pHeap, 64, NULL, &pMemory, true, false);
-	MuMapMemory(pHeap, 876, NULL, &pMemory, true, false);
+	//MuMapMemory(pHeap, 423, NULL, &pMemory, true, false);
+	//MuMapMemory(pHeap, 64, NULL, &pMemory, true, false);
+	//MuMapMemory(pHeap, 876, NULL, &pMemory, true, false);
 	
 	if (!MuMapMemory(pHeap, 8, NULL, &pMemory, true, false))
 	{

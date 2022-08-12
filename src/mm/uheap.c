@@ -14,6 +14,11 @@
 
 UserHeap* g_pCurrentUserHeap;
 
+UserHeap* MuGetCurrentHeap()
+{
+	return g_pCurrentUserHeap;
+}
+
 extern uint32_t g_KernelPageDirectory[];
 
 UserHeap* MuCreateHeap()
@@ -60,6 +65,8 @@ void MuKillPageTablesEntries(uint32_t* pPageTable)
 
 void MuKillHeap(UserHeap* pHeap)
 {
+	// TODO: Force copy on write on heaps that have been cloned from here
+	
 	// To kill the heap, first we need to empty all the page tables
 	for (int i = 0; i < 0x200; i++)
 	{
@@ -154,16 +161,23 @@ bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, b
 	}
 	
 	// Is there a page entry already?
-	if (*pPageEntry & PAGE_BIT_PRESENT)
+	if (*pPageEntry & (PAGE_BIT_PRESENT | PAGE_BIT_DAI))
 	{
 		// Yeah... For obvious reasons we can't map here
 		return false;
 	}
 	
-	*pPageEntry = physAddress & PAGE_BIT_ADDRESS_MASK;
-	*pPageEntry |= PAGE_BIT_PRESENT;
-	if (bReadWrite)
-		*pPageEntry |= PAGE_BIT_READWRITE;
+	if (physAddress)
+	{
+		*pPageEntry = physAddress & PAGE_BIT_ADDRESS_MASK;
+		*pPageEntry |= PAGE_BIT_PRESENT;
+		if (bReadWrite)
+			*pPageEntry |= PAGE_BIT_READWRITE;
+	}
+	else
+	{
+		*pPageEntry = PAGE_BIT_DAI;
+	}
 	
 	// WORK: This might not actually be needed if TLB doesn't actually cache non-present pages. Better to be on the safe side, though
 	MmInvalidateSinglePage(address);
@@ -181,13 +195,18 @@ bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address)
 		return false;
 	}
 	
-	uint32_t memFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
-	if (!(*pPageEntry & PAGE_BIT_MMIO))
-		MpClearFrame(memFrame);
-	
-	// Remove it!!!
-	*pPageEntry = 0;
-	MmInvalidateSinglePage(address);
+	// A page entry was allocated here, and it has been copied-on-write
+	if ((*pPageEntry & PAGE_BIT_PRESENT) && !(*pPageEntry & PAGE_BIT_COW))
+	{
+		uint32_t memFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
+		
+		if (!(*pPageEntry & PAGE_BIT_MMIO))
+			MpClearFrame(memFrame);
+		
+		// Remove it!!!
+		*pPageEntry = 0;
+		MmInvalidateSinglePage(address);
+	}
 	
 	return true;
 }
@@ -259,7 +278,7 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 			goto _rollback;
 		
 		// If this is going to get clobbered..
-		if (*pPageEntry & PAGE_BIT_PRESENT)
+		if (*pPageEntry & (PAGE_BIT_PRESENT | PAGE_BIT_DAI))
 		{
 			if (!bAllowClobbering)
 				goto _rollback;
@@ -274,6 +293,7 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 		}
 		else
 		{
+			/*
 			uint32_t FreeFrame = MpFindFreeFrame();
 			
 			// if out of memory, roll back the mapping
@@ -282,10 +302,11 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 			
 			MpSetFrame(FreeFrame << 12);
 			
-			*pPageEntry = FreeFrame << 12;
+			*pPageEntry = FreeFrame << 12;*/
 		}
 		
-		*pPageEntry |= PAGE_BIT_PRESENT;
+		//*pPageEntry |= PAGE_BIT_PRESENT;
+		*pPageEntry |= PAGE_BIT_DAI;
 		
 		if (bReadWrite)
 			*pPageEntry |= PAGE_BIT_READWRITE;
