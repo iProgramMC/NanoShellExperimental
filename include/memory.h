@@ -60,6 +60,12 @@ UserHeapAllocChainItem;
 
 STATIC_ASSERT(sizeof(UserHeapAllocChainItem)  == 4096, "This should be 4096 bytes");
 
+typedef struct
+{
+	uint32_t m_pageEntries[PAGE_SIZE / 4];
+	uint32_t m_refCounts  [PAGE_SIZE / 4];
+}
+PageTable;
 
 // User heap structure
 typedef struct UserHeap
@@ -68,7 +74,7 @@ typedef struct UserHeap
 	
 	uint32_t*  m_pPageDirectory;   // The virtual  address of the page directory
 	uint32_t   m_nPageDirectory;   // The physical address of the page directory
-	uint32_t*  m_pPageTables[512]; // The user half's page tables referenced by the page directory.
+	PageTable* m_pPageTables[512]; // The user half's page tables referenced by the page directory.
 	uint32_t   m_nMappingHint;     // The hint to use when mapping with no hint next.
 	
 	// This is a dynamic array storing all the allocations that have been added using

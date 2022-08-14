@@ -207,15 +207,30 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 					//This is fixed by keeping the parent alive until all the children have been killed too
 					
 					//ensure that the bit is clear
-					*pEntryDst &= ~PAGE_BIT_READWRITE;
 					
-					//use the same physical page as the source
-					*pEntryDst = (*pEntrySrc & PAGE_BIT_ADDRESS_MASK) | PAGE_BIT_PRESENT;
-					
-					//if it's read-write, set the COW bit
-					if (*pEntrySrc & PAGE_BIT_READWRITE)
+					// MMIO is inilligible for CoW
+					if (*pEntrySrc & PAGE_BIT_MMIO)
 					{
-						*pEntryDst |= PAGE_BIT_COW;
+						// Make the second page also point to the MMIO stuff
+						*pEntryDst = *pEntrySrc;
+					}
+					else if (*pEntrySrc & PAGE_BIT_DAI)
+					{
+						// Make the second page be demand-paging too
+						*pEntryDst = *pEntrySrc;
+					}
+					else
+					{
+						*pEntryDst &= ~PAGE_BIT_READWRITE;
+						
+						//use the same physical page as the source
+						*pEntryDst = (*pEntrySrc & PAGE_BIT_ADDRESS_MASK) | PAGE_BIT_PRESENT;
+						
+						//if it's read-write, set the COW bit
+						if (*pEntrySrc & PAGE_BIT_READWRITE)
+						{
+							*pEntryDst |= PAGE_BIT_COW;
+						}
 					}
 				}
 			}
@@ -225,20 +240,18 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 	return pHeap;
 }
 
-void MuKillPageTablesEntries(uint32_t* pPageTable)
+void MuKillPageTablesEntries(PageTable* pPageTable)
 {
 	// Free each of the pages, if there are any
 	for (int i = 0; i < 0x400; i++)
 	{
-		if (pPageTable[i] & PAGE_BIT_PRESENT)
+		if (pPageTable->m_pageEntries[i] & PAGE_BIT_PRESENT)
 		{
-			uint32_t frame = pPageTable[i] & PAGE_BIT_ADDRESS_MASK;
+			uint32_t frame = pPageTable->m_pageEntries[i] & PAGE_BIT_ADDRESS_MASK;
 			
 			MpClearFrame(frame);
 			
-			pPageTable[i] = 0;
-			
-			//TODO: Determine what page table this is so we can invalidate the page
+			pPageTable->m_pageEntries[i] = 0;
 		}
 	}
 }
@@ -287,8 +300,13 @@ void MuCreatePageTable(UserHeap *pHeap, int pageTable)
 	pHeap->m_pPageDirectory[pageTable] = 0;
 	
 	// Create a new page table page on the kernel heap.
-	pHeap->m_pPageTables[pageTable] = MhAllocateSinglePage(&pHeap->m_pPageDirectory[pageTable]);
-	memset(pHeap->m_pPageTables[pageTable], 0, PAGE_SIZE);
+	uint32_t physOut[2];//don't actually care about the second page, but we need it
+	
+	pHeap->m_pPageTables[pageTable] = MhAllocate(PAGE_SIZE * 2, physOut);
+	
+	pHeap->m_pPageDirectory[pageTable] = physOut[0];
+	
+	memset(pHeap->m_pPageTables[pageTable], 0, PAGE_SIZE * 2);
 	
 	// Assign its bits, too.
 	pHeap->m_pPageDirectory[pageTable] |= PAGE_BIT_PRESENT | PAGE_BIT_READWRITE;
@@ -345,7 +363,7 @@ uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePag
 	}
 	
 	// Alright, grab a reference to the page entry, and return it.
-	uint32_t* pPageEntry = &pHeap->m_pPageTables[addressSplit.pageTable][addressSplit.pageEntry];
+	uint32_t* pPageEntry = &pHeap->m_pPageTables[addressSplit.pageTable]->m_pageEntries[addressSplit.pageEntry];
 	return pPageEntry;
 }
 
