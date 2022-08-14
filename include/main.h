@@ -32,6 +32,8 @@ extern unsigned short ReadPortW(unsigned short port);
 //note: needs to be used for arrays only (So no pointers, otherwise it'll go weird)
 #define ARRAY_COUNT(array) (sizeof(array)/sizeof(*array))
 
+#define STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+
 bool OnAssertionFail (const char *pStr, const char *pFile, const char *pFunc, int nLine);
 #define ASSERT(condition) ((condition) || OnAssertionFail(#condition, __FILE__, __FUNCTION__, __LINE__))
 

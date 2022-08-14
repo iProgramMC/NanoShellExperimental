@@ -33,12 +33,33 @@
 #include <multiboot.h>
 #include <idt.h>
 
+// Namespace guide:
+// * Mu = User Heaps
+// * Mh = Kernel Heap
+// * Mp = Physical Memory Manager
+// * Mm = Exposed programming interface
+
 typedef struct
 {
 	void * m_pAddr;
 	size_t m_nPages;
 }
 UserHeapAlloc;
+
+typedef struct tagUserHeapAllocChainItem
+{
+	struct tagUserHeapAllocChainItem* pNext;
+	
+	size_t padding; //on 64-bit, UserHeapAlloc would be 16 bytes
+	
+	// each structure is able to hold 511 alloc entries
+	UserHeapAlloc m_allocs[(PAGE_SIZE / sizeof(UserHeapAlloc)) - 1];
+}
+UserHeapAllocChainItem;
+
+
+STATIC_ASSERT(sizeof(UserHeapAllocChainItem)  == 4096, "This should be 4096 bytes");
+
 
 // User heap structure
 typedef struct UserHeap
@@ -53,7 +74,7 @@ typedef struct UserHeap
 	// This is a dynamic array storing all the allocations that have been added using
 	// operations such as MuMapMemory. When it's time to MuUnMap(pAddr), unmap it all,
 	// not just one page.
-	UserHeapAlloc*    m_pAllocations;
+	UserHeapAllocChainItem* m_pAllocations;
 	
 	// You can only clone a user heap from one parent.
 	// When a clone operation is performed, the reference count of the cloned heap
@@ -93,15 +114,18 @@ UserHeap* MuCreateHeap();
 UserHeap* MuGetCurrentHeap();
 UserHeap* MuCloneHeap(UserHeap* pHeapToClone);
 void MuKillHeap(UserHeap *pHeap);
-void MuCreatePageTable(UserHeap *pHeap, int pageTable);
-void MuRemovePageTable(UserHeap *pHeap, int pageTable);
+void MuDebugLogHeapList(UserHeap *pHeap);
 uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable);
 bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, bool bReadWrite);
-bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address);
 bool MuAreMappingParmsValid(uintptr_t start, size_t nPages);
 bool MuIsMappingFree(UserHeap *pHeap, uintptr_t start, size_t nPages);
 bool MuMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO);
 bool MuMapMemoryNonFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO);
 bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, bool bReadWrite, bool bAllowClobbering, bool bIsMMIO);
+
+// Functions that really shouldn't be used
+void MuCreatePageTable(UserHeap *pHeap, int pageTable);
+void MuRemovePageTable(UserHeap *pHeap, int pageTable);
+bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address);
 
 #endif//_MEMORY_H
