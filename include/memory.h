@@ -110,6 +110,11 @@ void MpInitialize(multiboot_info_t* pInfo);
 int  MpGetNumFreePages();
 uintptr_t MpRequestFrame();
 
+// Physical memory reference count manager
+uint32_t MrGetReferenceCount(uintptr_t page);
+uint32_t MrReferencePage(uintptr_t page);
+uint32_t MrUnreferencePage(uintptr_t page);
+
 // Hardware
 void MmTlbInvalidate();
 void MmUsePageDirectory(uintptr_t pageDir);   //unsafe!! This is exposed just so that other memory code can use it.

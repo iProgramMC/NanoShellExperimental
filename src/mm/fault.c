@@ -25,7 +25,7 @@ void MmOnPageFault(Registers *pRegs)
 	
 	UserHeap *pHeap = MuGetCurrentHeap();
 	
-	//LogMsg("Page fault happened at %x (error code: %x) on Heap %p", pRegs->cr2, pRegs->error_code, pHeap);
+	LogMsg("Page fault happened at %x (error code: %x) on Heap %p", pRegs->cr2, pRegs->error_code, pHeap);
 	
 	union
 	{
@@ -72,18 +72,16 @@ void MmOnPageFault(Registers *pRegs)
 				//LogMsg("Page not present, allocating...");
 				
 				// It's time to map a page here
-				uint32_t frame = MpFindFreeFrame();
+				uint32_t frame = MpRequestFrame();
 				
-				if (frame == 0xFFFFFFFF)
+				if (frame == 0)
 				{
 					LogMsg("Out of memory, d'oh!");
 					goto _INVALID_PAGE_FAULT;
 				}
 				
-				MpSetFrame(frame << 12);
-				
 				*pPageEntry = *pPageEntry & 0xFFF;
-				*pPageEntry |= frame << 12;
+				*pPageEntry |= frame;
 				*pPageEntry |= PAGE_BIT_PRESENT;
 				*pPageEntry &= ~PAGE_BIT_DAI;
 				
@@ -116,28 +114,51 @@ void MmOnPageFault(Registers *pRegs)
 		if (*pPageEntry & PAGE_BIT_COW)
 		{
 			// It's show time...
-			uint32_t frame = MpFindFreeFrame();
+			uint32_t oldFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
 			
-			if (frame == 0xFFFFFFFF)
+			LogMsg("Page supposed to be copied on write, was frame %x", oldFrame);
+			
+			uint32_t refCount = MrGetReferenceCount(oldFrame);
+			if (refCount == 1)
 			{
-				LogMsg("Out of memory, d'oh!");
-				goto _INVALID_PAGE_FAULT;
+				LogMsg("Since its reference count is one, there's no need to duplicate this");
+				
+				// this is the only reference, don't duplicate
+				*pPageEntry |= PAGE_BIT_READWRITE | PAGE_BIT_PRESENT;
+				*pPageEntry &= ~PAGE_BIT_COW;
+				
+				MmInvalidateSinglePage(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK); // Refresh
 			}
-			
-			//LogMsg("Page supposed to be copied on write, allocated frame %x", frame<<12);
-			MpSetFrame(frame << 12);
-			
-			uint8_t data[PAGE_SIZE];
-			memcpy(data, (void*)(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK), PAGE_SIZE);
-			
-			*pPageEntry = *pPageEntry & 0xFFF;
-			*pPageEntry |= frame << 12;
-			*pPageEntry |= PAGE_BIT_READWRITE;
-			*pPageEntry &= ~PAGE_BIT_COW;
-			
-			MmInvalidateSinglePage(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK); // Refresh
-			
-			memcpy ((void*)(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK), data, PAGE_SIZE);
+			else if (refCount == 0)
+			{
+				LogMsg("Huh? Page's reference count is zero??");
+			}
+			else
+			{
+				LogMsg("Since its reference count is %d, we need to duplicate this", refCount);
+				
+				MrUnreferencePage(oldFrame);
+				
+				uint8_t data[PAGE_SIZE];
+				memcpy(data, (void*)(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK), PAGE_SIZE);
+				
+				uint32_t frame = MpRequestFrame();
+				
+				if (frame == 0)
+				{
+					LogMsg("Out of memory, d'oh!");
+					goto _INVALID_PAGE_FAULT;
+				}
+				
+				*pPageEntry = *pPageEntry & 0xFFF;
+				*pPageEntry |= frame;
+				*pPageEntry |= PAGE_BIT_READWRITE;
+				*pPageEntry &= ~PAGE_BIT_COW;
+				
+				MmInvalidateSinglePage(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK); // Refresh
+				
+				memcpy ((void*)(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK), data, PAGE_SIZE);
+			}
 			
 			// Go!
 			return;
@@ -146,6 +167,8 @@ void MmOnPageFault(Registers *pRegs)
 	
 _INVALID_PAGE_FAULT:
 	LogMsg("Invalid page fault at EIP: %x. CR2: %x. ErrorCode: %x", pRegs->eip, pRegs->cr2, pRegs->error_code);
+	LogMsg("Registers:");
+	LogMsg("EAX: %x  EBX: %x  ECX: %x  EDX: %x  ESP: %x  EBP: %x",pRegs->eax, pRegs->ebx, pRegs->ecx, pRegs->edx, pRegs->esp, pRegs->ebp);
 	KeStopSystem();
 }
 

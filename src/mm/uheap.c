@@ -221,8 +221,6 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 					}
 					else
 					{
-						*pEntryDst &= ~PAGE_BIT_READWRITE;
-						
 						//use the same physical page as the source
 						*pEntryDst = (*pEntrySrc & PAGE_BIT_ADDRESS_MASK) | PAGE_BIT_PRESENT;
 						
@@ -230,6 +228,11 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 						if (*pEntrySrc & PAGE_BIT_READWRITE)
 						{
 							*pEntryDst |= PAGE_BIT_COW;
+							
+							// also set it to the source, because otherwise, the source could modify
+							// the page's contents for the destination
+							*pEntrySrc |= PAGE_BIT_COW;
+							*pEntrySrc &= ~PAGE_BIT_READWRITE;
 						}
 					}
 				}
@@ -403,12 +406,15 @@ bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, b
 
 void MuKillPageEntry(uint32_t* pPageEntry, uintptr_t address)
 {
-	if ((*pPageEntry & PAGE_BIT_PRESENT) && !(*pPageEntry & PAGE_BIT_COW))
+	if (*pPageEntry & PAGE_BIT_PRESENT)
 	{
 		uint32_t memFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
 		
 		if (!(*pPageEntry & PAGE_BIT_MMIO))
+		{
 			MpClearFrame(memFrame);
+			MrUnreferencePage(memFrame);
+		}
 		
 		// Remove it!!!
 		*pPageEntry = 0;

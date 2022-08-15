@@ -91,8 +91,10 @@ uintptr_t MpRequestFrame()
 		return 0;
 	}
 	
-	MpSetFrame(frame << 12);
-	return frame << 12;
+	uintptr_t result = frame << 12;
+	MpSetFrame(result);
+	MrReferencePage(result);
+	return result;
 }
 
 void MmStartupStuff();

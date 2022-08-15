@@ -145,13 +145,14 @@ void MhFreePage(void* pPage)
 		uint32_t physicalFrame = g_KernelPageEntries[index] & PAGE_BIT_ADDRESS_MASK;
 		
 		MpClearFrame(physicalFrame);
-		
-		MmInvalidateSinglePage((uintptr_t)pPage);
+		MrUnreferencePage(physicalFrame);
 	}
 	
 	// Ok. Free it now
 	g_KernelPageEntries  [index] = 0;
 	g_KernelHeapAllocSize[index] = 0;
+	
+	MmInvalidateSinglePage((uintptr_t)pPage);
 }
 
 void MhFree(void* pPage)
