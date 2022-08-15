@@ -148,8 +148,15 @@ void MuTest()
 	// Clone the heap.
 	UserHeap *pNewHeap = MuCloneHeap(pHeap);
 	
+	LogMsg("pMemory is %x %x",  *((uint32_t*)pMemory), *((uint32_t*)pMemory + 1));
+	
+	// Write to pMemory as the original heap
+	*((uint32_t*)pMemory) = 0xDEADBEEF;
+	LogMsg("pMemory is %x %x",  *((uint32_t*)pMemory), *((uint32_t*)pMemory + 1));
+	
 	MuUseHeap(pNewHeap);
 	
+	LogMsg("On new heap it is %x %x", *((uint32_t*)pMemory), *((uint32_t*)pMemory + 1));
 	// Write to pMemory
 	*((uint32_t*)pMemory) = 0xCAFEBABE;
 	LogMsg("Wrote to pMemory=%p on heap %p: %x %x", pMemory, pNewHeap, *((uint32_t*)pMemory), *((uint32_t*)pMemory + 1));
@@ -158,9 +165,17 @@ void MuTest()
 	
 	LogMsg("On old heap it is %x %x", *((uint32_t*)pMemory), *((uint32_t*)pMemory + 1));
 	
-	MuResetHeap();
+	LogMsg("Killing pHeap...");
+	
+	MuUseHeap(pNewHeap);
 	
 	MuKillHeap(pHeap);
+	
+	LogMsg("On new heap it is %x %x", *((uint32_t*)pMemory), *((uint32_t*)pMemory + 1));
+	
+	LogMsg("Killing pNewHeap...");
+	MuResetHeap();
+	
 	MuKillHeap(pNewHeap);
 	pHeap = NULL;
 	pNewHeap = NULL;

@@ -407,6 +407,6 @@ void KePrintSystemInfo()
 extern int g_textX, g_textY;
 void PrInitialize()
 {
-	SwitchMode(1);
+	SwitchMode(0);
 	CoInitAsText(&g_debugConsole);
 }

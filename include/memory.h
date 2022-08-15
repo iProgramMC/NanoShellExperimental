@@ -93,12 +93,6 @@ typedef struct UserHeap
 	// operations such as MuMapMemory. When it's time to MuUnMap(pAddr), unmap it all,
 	// not just one page.
 	UserHeapAllocChainItem* m_pAllocations;
-	
-	// You can only clone a user heap from one parent.
-	// When a clone operation is performed, the reference count of the cloned heap
-	// is increased. Even if the cloned heap gets 'killed' later, it actually doesn't,
-	// it lives on until all the things that have cloned it die off too.
-	struct UserHeap* m_pUserHeapParent;
 }
 UserHeap;
 

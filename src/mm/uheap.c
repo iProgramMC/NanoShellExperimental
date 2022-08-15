@@ -31,7 +31,6 @@ UserHeap* MuCreateHeap()
 	pHeap->m_nMappingHint    = USER_HEAP_BASE;
 	pHeap->m_pPageDirectory  = MhAllocateSinglePage(&pHeap->m_nPageDirectory);
 	pHeap->m_pAllocations    = NULL;
-	pHeap->m_pUserHeapParent = NULL;
 	
 	memset(pHeap->m_pPageDirectory, 0, PAGE_SIZE);
 	
@@ -183,9 +182,6 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 {
 	UserHeap *pHeap = MuCreateHeap();
 	
-	pHeapToClone->m_nRefCount++;
-	pHeap->m_pUserHeapParent = pHeapToClone;
-	
 	// Clone each page table
 	for (int i = 0x000; i < 0x200; i++)
 	{
@@ -199,7 +195,14 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 				uint32_t* pEntryDst = MuGetPageEntryAt(pHeap,        vAddr, true);
 				uint32_t* pEntrySrc = MuGetPageEntryAt(pHeapToClone, vAddr, true);
 				
-				if (*pEntrySrc & PAGE_BIT_PRESENT)
+				if (*pEntrySrc & PAGE_BIT_DAI)
+				{
+					// Make the second page be demand-paged too. Because it doesn't have a
+					// physical page frame assigned to it this should be fine.
+					//SLogMsg("Page %p is demand paged", vAddr);
+					*pEntryDst = *pEntrySrc;
+				}
+				else if (*pEntrySrc & PAGE_BIT_PRESENT)
 				{
 					//We don't have a way to track the reference count of individual pages.
 					//So when the parent gets killed, the children will be working with a
@@ -214,12 +217,7 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 					{
 						SLogMsg("Page %p is MMIO", vAddr);
 						// Make the second page also point to the MMIO stuff
-						*pEntryDst = *pEntrySrc;
-					}
-					else if (*pEntrySrc & PAGE_BIT_DAI)
-					{
-						// Make the second page be demand-paging too
-						SLogMsg("Page %p is demand paged", vAddr);
+						// MMIO is not subject to reference counting
 						*pEntryDst = *pEntrySrc;
 					}
 					else
@@ -227,6 +225,7 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 						//use the same physical page as the source
 						*pEntryDst = (*pEntrySrc & PAGE_BIT_ADDRESS_MASK) | PAGE_BIT_PRESENT;
 						
+						//increase the reference count, because another heap will point here too!
 						MrReferencePage(*pEntrySrc & PAGE_BIT_ADDRESS_MASK);
 						
 						//if it's read-write, set the COW bit
@@ -238,6 +237,10 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 							// the page's contents for the destination
 							*pEntrySrc |= PAGE_BIT_COW;
 							*pEntrySrc &= ~PAGE_BIT_READWRITE;
+							
+							// If we make changes to the TLB, invalidate the page that was modified, because otherwise,
+							// the heap that was cloned may sneak in a write after the clone, which will affect the clone
+							MmInvalidateSinglePage((uintptr_t)vAddr);
 						}
 					}
 				}
@@ -272,7 +275,7 @@ void MuKillHeap(UserHeap* pHeap)
 	
 	if (pHeap->m_nRefCount == 0)
 	{
-		LogMsg("Heap %p will be killed off now.", pHeap);
+		SLogMsg("Heap %p will be killed off now.", pHeap);
 		// To kill the heap, first we need to empty all the page tables
 		for (int i = 0; i < 0x200; i++)
 		{
@@ -282,10 +285,6 @@ void MuKillHeap(UserHeap* pHeap)
 			}
 		}
 		
-		// Kill off the parent as well, if needed
-		if (pHeap->m_pUserHeapParent)
-			MuKillHeap(pHeap->m_pUserHeapParent);
-		
 		// Should be good to go.  Free the page directory, and then the heap itself
 		MuFreeHeapAllocChain(pHeap->m_pAllocations);
 		
@@ -294,7 +293,7 @@ void MuKillHeap(UserHeap* pHeap)
 	}
 	else
 	{
-		LogMsg("Heap %p won't die yet, because it's reference count is %d!", pHeap, pHeap->m_nRefCount);
+		SLogMsg("Heap %p won't die yet, because it's reference count is %d!", pHeap, pHeap->m_nRefCount);
 	}
 }
 
