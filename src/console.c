@@ -145,6 +145,14 @@ void CoPrintString (Console* this, const char *c) {
 	CoMoveCursor(this);
 }
 
+void DebugPutString(const char* p)
+{
+	while (*p)
+	{
+		WritePort(0xE9, *p++);
+	}
+}
+
 void LogMsg (const char* fmt, ...) {
 	////allocate a buffer well sized
 	char cr[8192];
@@ -164,6 +172,31 @@ void LogMsgNoCr (const char* fmt, ...) {
 	va_start(list, fmt);
 	vsprintf(cr, fmt, list);
 	CoPrintString(g_currentConsole, cr);
+	
+	va_end(list);
+}
+
+void SLogMsg (const char* fmt, ...) {
+	////allocate a buffer well sized
+	char cr[8192];
+	va_list list;
+	va_start(list, fmt);
+	vsprintf(cr, fmt, list);
+	
+	sprintf (cr + strlen(cr), "\n");
+	
+	DebugPutString(cr);
+	
+	va_end(list);
+}
+void SLogMsgNoCr (const char* fmt, ...) {
+	////allocate a buffer well sized
+	char cr[8192];
+	va_list list;
+	va_start(list, fmt);
+	vsprintf(cr, fmt, list);
+	
+	DebugPutString(cr);
 	
 	va_end(list);
 }

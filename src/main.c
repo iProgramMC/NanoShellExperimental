@@ -168,6 +168,8 @@ void MuTest()
 	LogMsg("Hello I'm back!");
 }
 
+void MrDebug();
+
 extern int g_numPagesAvailable;
 void MmInitializePMM(multiboot_info_t* pInfo);
 
@@ -200,14 +202,24 @@ void KeStartupSystem (unsigned long magic, unsigned long mbaddr)
 	LogMsg("NanoShell Experimental Operating System " VersionString);
 	LogMsg("[%d Kb System Memory, %d Kb Usable Memory]", nKbExtRam, g_numPagesAvailable * 4	);
 	
+	SLogMsg("Kernel is ONLINE with %d pages of memory available", g_numPagesAvailable);
+	
 	LogMsg("There are %d pages available to the system, %d of which are still free.", g_numPagesAvailable, MpGetNumFreePages());
 	
 	MhTest();
 	
 	MuTest();
 	
-	LogMsg("There are now %d out of %d pages available to the system.", MpGetNumFreePages(), g_numPagesAvailable);
+	int nPagesFreeNow = MpGetNumFreePages();
+	LogMsg("There are now %d out of %d pages available to the system.", nPagesFreeNow, g_numPagesAvailable);
 	LogMsg("We have faulted %d times.", MmGetNumPageFaults());
+	
+	if (nPagesFreeNow != g_numPagesAvailable)
+	{
+		LogMsg("Uh oh! There's a leak somewhere! Deal with it iProgramInCpp!");
+	}
+	
+	MrDebug();
 	
 	FreeTypeThing();
 	

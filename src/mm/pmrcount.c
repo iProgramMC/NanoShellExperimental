@@ -45,7 +45,7 @@ uint32_t MrGetReferenceCount(uintptr_t page)
 // Returns the new reference count
 uint32_t MrReferencePage(uintptr_t page)
 {
-	LogMsg("MrReferencePage(%p)",page);
+	SLogMsg("MrReferencePage(%p)",page);
 	// Split the address up into chunks
 	union
 	{
@@ -70,7 +70,7 @@ uint32_t MrReferencePage(uintptr_t page)
 		// 4m cluster
 		g_root.m_level1[aSplit.level1] = MhAllocateSinglePage(NULL);
 		
-		LogMsg("g_root.m_level1[%d] = %p", aSplit.level1, g_root.m_level1[aSplit.level1]);
+		SLogMsg("g_root.m_level1[%d] = %p", aSplit.level1, g_root.m_level1[aSplit.level1]);
 		
 		if (!g_root.m_level1[aSplit.level1])
 		{
@@ -89,6 +89,7 @@ uint32_t MrReferencePage(uintptr_t page)
 
 uint32_t MrUnreferencePage(uintptr_t page)
 {
+	SLogMsg("MrUnreferencePage(%p)",page);
 	// Split the address up into chunks
 	union
 	{
@@ -114,6 +115,13 @@ uint32_t MrUnreferencePage(uintptr_t page)
 	
 	uint32_t* pRefCount = &g_root.m_level1[aSplit.level1]->m_refCounts[aSplit.level2];
 	
+	if (!*pRefCount)
+	{
+		// No
+		LogMsg("Couldn't unreference physical page %x, its reference count is zero...", page);
+		KeStopSystem();
+	}
+	
 	uint32_t result = --(*pRefCount);
 	
 	if (!*pRefCount)
@@ -132,11 +140,26 @@ uint32_t MrUnreferencePage(uintptr_t page)
 		if (!bNotAllZeroes)
 		{
 			// we can free this!!
-			LogMsg("Freeing empty level1 at %x (%p)", aSplit.level1, page);
+			SLogMsg("Freeing empty level1 at %x (%p)", aSplit.level1, page);
 			MhFree(g_root.m_level1[aSplit.level1]);
 			g_root.m_level1[aSplit.level1] = NULL;
 		}
 	}
 	
 	return result;
+}
+
+void MrDebug()
+{
+	for (int i = 0; i < 1024; i++)
+	{
+		if (g_root.m_level1[i])
+		{
+			for (int j = 0; j < 1024; j++)
+			{
+				if (g_root.m_level1[i]->m_refCounts[j])
+					LogMsg("Page %x has ref count %d", i<<22|j<<12, g_root.m_level1[i]->m_refCounts[j]);
+			}
+		}
+	}
 }

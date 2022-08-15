@@ -89,7 +89,7 @@ void* MhSetupPage(int index, uint32_t* pPhysOut)
 	// if we require a physical address, allocate a physical page right away
 	if (pPhysOut)
 	{
-		uintptr_t frame = MpRequestFrame();
+		uintptr_t frame = MpRequestFrame(true);
 		if (!frame)
 		{
 			LogMsg("Out of memory in MhSetupPage?!");
@@ -145,7 +145,8 @@ void MhFreePage(void* pPage)
 		uint32_t physicalFrame = g_KernelPageEntries[index] & PAGE_BIT_ADDRESS_MASK;
 		
 		MpClearFrame(physicalFrame);
-		MrUnreferencePage(physicalFrame);
+		// not on kernel heap, so don't
+		//MrUnreferencePage(physicalFrame);
 	}
 	
 	// Ok. Free it now

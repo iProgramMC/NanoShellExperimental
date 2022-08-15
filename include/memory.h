@@ -108,7 +108,7 @@ void MpSetFrame  (uint32_t frameAddr);
 void MpClearFrame(uint32_t frameAddr);
 void MpInitialize(multiboot_info_t* pInfo);
 int  MpGetNumFreePages();
-uintptr_t MpRequestFrame();
+uintptr_t MpRequestFrame(bool bIsKernelHeap);
 
 // Physical memory reference count manager
 uint32_t MrGetReferenceCount(uintptr_t page);

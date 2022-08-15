@@ -195,8 +195,9 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 			
 			for (int entry = 0x000; entry < 0x400; entry++)
 			{
-				uint32_t* pEntryDst = MuGetPageEntryAt(pHeap,        i << 22 | entry << 12, true);
-				uint32_t* pEntrySrc = MuGetPageEntryAt(pHeapToClone, i << 22 | entry << 12, true);
+				uintptr_t vAddr = i << 22 | entry << 12;
+				uint32_t* pEntryDst = MuGetPageEntryAt(pHeap,        vAddr, true);
+				uint32_t* pEntrySrc = MuGetPageEntryAt(pHeapToClone, vAddr, true);
 				
 				if (*pEntrySrc & PAGE_BIT_PRESENT)
 				{
@@ -211,18 +212,22 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 					// MMIO is inilligible for CoW
 					if (*pEntrySrc & PAGE_BIT_MMIO)
 					{
+						SLogMsg("Page %p is MMIO", vAddr);
 						// Make the second page also point to the MMIO stuff
 						*pEntryDst = *pEntrySrc;
 					}
 					else if (*pEntrySrc & PAGE_BIT_DAI)
 					{
 						// Make the second page be demand-paging too
+						SLogMsg("Page %p is demand paged", vAddr);
 						*pEntryDst = *pEntrySrc;
 					}
 					else
 					{
 						//use the same physical page as the source
 						*pEntryDst = (*pEntrySrc & PAGE_BIT_ADDRESS_MASK) | PAGE_BIT_PRESENT;
+						
+						MrReferencePage(*pEntrySrc & PAGE_BIT_ADDRESS_MASK);
 						
 						//if it's read-write, set the COW bit
 						if (*pEntrySrc & PAGE_BIT_READWRITE)
@@ -311,7 +316,6 @@ void MuRemovePageTable(UserHeap *pHeap, int pageTable)
 	// If we have a page table there...
 	if (pHeap->m_pPageTables[pageTable])
 	{
-		// TODO: ensure that there are no page entries
 		MuKillPageTablesEntries(pHeap->m_pPageTables[pageTable]);
 		
 		// reset it to zero
@@ -390,6 +394,10 @@ bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, b
 		*pPageEntry |= PAGE_BIT_PRESENT;
 		if (bReadWrite)
 			*pPageEntry |= PAGE_BIT_READWRITE;
+		
+		LogMsg("Adding reference");
+		
+		MrReferencePage(physAddress);
 	}
 	else
 	{

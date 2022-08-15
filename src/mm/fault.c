@@ -12,6 +12,21 @@
 #include <memory.h>
 #include <string.h>
 
+//#define COW_DEBUG
+//#define DAI_DEBUG
+
+#ifdef COW_DEBUG
+#define CowDebugLogMsg(...) LogMsg(__VA_ARGS__)
+#else
+#define CowDebugLogMsg(...)
+#endif
+
+#ifdef DAI_DEBUG
+#define DaiDebugLogMsg(...) LogMsg(__VA_ARGS__)
+#else
+#define DaiDebugLogMsg(...)
+#endif
+
 int g_nPageFaultsSoFar = 0;//just for statistics
 
 int MmGetNumPageFaults()
@@ -25,7 +40,7 @@ void MmOnPageFault(Registers *pRegs)
 	
 	UserHeap *pHeap = MuGetCurrentHeap();
 	
-	LogMsg("Page fault happened at %x (error code: %x) on Heap %p", pRegs->cr2, pRegs->error_code, pHeap);
+	//LogMsg("Page fault happened at %x (error code: %x) on Heap %p", pRegs->cr2, pRegs->error_code, pHeap);
 	
 	union
 	{
@@ -49,6 +64,7 @@ void MmOnPageFault(Registers *pRegs)
 	{
 		// Wasn't present...
 		uint32_t* pPageEntry = NULL;
+		bool bIsKernelHeap = false;
 		if (pHeap)
 		{
 			pPageEntry = MuGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
@@ -57,6 +73,7 @@ void MmOnPageFault(Registers *pRegs)
 		{
 			// Hrm, maybe it's part of the kernel heap, that can be demand-paged too
 			pPageEntry = MhGetPageEntry(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK);
+			bIsKernelHeap = true;
 		}
 		
 		if (pPageEntry)
@@ -69,16 +86,18 @@ void MmOnPageFault(Registers *pRegs)
 			
 			if (*pPageEntry & PAGE_BIT_DAI)
 			{
-				//LogMsg("Page not present, allocating...");
+				DaiDebugLogMsg("Page not present, allocating %s...", bIsKernelHeap?" on kernel heap" : "on user heap");
 				
 				// It's time to map a page here
-				uint32_t frame = MpRequestFrame();
+				uint32_t frame = MpRequestFrame(bIsKernelHeap);
 				
 				if (frame == 0)
 				{
 					LogMsg("Out of memory, d'oh!");
 					goto _INVALID_PAGE_FAULT;
 				}
+				
+				DaiDebugLogMsg("Got page %x", frame);
 				
 				*pPageEntry = *pPageEntry & 0xFFF;
 				*pPageEntry |= frame;
@@ -116,12 +135,12 @@ void MmOnPageFault(Registers *pRegs)
 			// It's show time...
 			uint32_t oldFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
 			
-			LogMsg("Page supposed to be copied on write, was frame %x", oldFrame);
+			CowDebugLogMsg("Page supposed to be copied on write, was frame %x", oldFrame);
 			
 			uint32_t refCount = MrGetReferenceCount(oldFrame);
 			if (refCount == 1)
 			{
-				LogMsg("Since its reference count is one, there's no need to duplicate this");
+				CowDebugLogMsg("Since its reference count is one, there's no need to duplicate this");
 				
 				// this is the only reference, don't duplicate
 				*pPageEntry |= PAGE_BIT_READWRITE | PAGE_BIT_PRESENT;
@@ -131,18 +150,18 @@ void MmOnPageFault(Registers *pRegs)
 			}
 			else if (refCount == 0)
 			{
-				LogMsg("Huh? Page's reference count is zero??");
+				CowDebugLogMsg("Huh? Page's reference count is zero??");
 			}
 			else
 			{
-				LogMsg("Since its reference count is %d, we need to duplicate this", refCount);
+				CowDebugLogMsg("Since its reference count is %d, we need to duplicate this", refCount);
 				
 				MrUnreferencePage(oldFrame);
 				
 				uint8_t data[PAGE_SIZE];
 				memcpy(data, (void*)(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK), PAGE_SIZE);
 				
-				uint32_t frame = MpRequestFrame();
+				uint32_t frame = MpRequestFrame(false);
 				
 				if (frame == 0)
 				{

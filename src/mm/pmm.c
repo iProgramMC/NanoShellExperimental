@@ -81,7 +81,7 @@ int MpGetNumFreePages()
 	return result;
 }
 
-uintptr_t MpRequestFrame()
+uintptr_t MpRequestFrame(bool bIsKernelHeap)
 {
 	uint32_t frame = MpFindFreeFrame();
 	if (frame == 0xFFFFFFFFu)
@@ -93,7 +93,11 @@ uintptr_t MpRequestFrame()
 	
 	uintptr_t result = frame << 12;
 	MpSetFrame(result);
-	MrReferencePage(result);
+	
+	// kernel heap doesn't do COW or anything so we don't need to track reference counts to it
+	if (!bIsKernelHeap)
+		MrReferencePage(result);
+	
 	return result;
 }
 
