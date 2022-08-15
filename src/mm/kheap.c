@@ -33,6 +33,21 @@ int       g_KernelHeapAllocSize[C_MAX_KERNEL_HEAP_PAGE_ENTRIES];
 uint32_t  g_KernelPageDirectory        [PAGE_SIZE / sizeof(uint32_t)] __attribute__((aligned(PAGE_SIZE)));
 uint32_t* g_KernelPageDirectoryVirtual [PAGE_SIZE / sizeof(uint32_t)];
 
+uint32_t* MhGetPageEntry(uintptr_t address)
+{
+	if (address < KERNEL_HEAP_BASE || address >= KERNEL_BASE_ADDRESS)
+		return NULL;
+	
+	// Turn this into an index into g_KernelPageEntries.
+	uint32_t pAddr = (uint32_t)address;
+	uint32_t index = (pAddr - KERNEL_HEAP_BASE) >> 12;
+	
+	if (index <= C_MAX_KERNEL_HEAP_PAGE_ENTRIES)
+		return &g_KernelPageEntries[index];
+	
+	return NULL;
+}
+
 void MmTlbInvalidate()
 {
 	__asm__ volatile ("movl %%cr3, %%ecx\n\tmovl %%ecx, %%cr3\n\t":::"cx");
@@ -71,22 +86,27 @@ void MhInitialize()
 
 void* MhSetupPage(int index, uint32_t* pPhysOut)
 {
-	uint32_t frame = MpFindFreeFrame();
-	if (frame == 0xFFFFFFFFu)
+	// if we require a physical address, allocate a physical page right away
+	if (pPhysOut)
 	{
-		// Out of memory.
-		LogMsg("Out of memory in MhSetupPage");
-		return NULL;
+		uintptr_t frame = MpRequestFrame();
+		if (!frame)
+		{
+			LogMsg("Out of memory in MhSetupPage?!");
+			return NULL;
+		}
+		
+		// Mark this page entry as present, and return its address.
+		g_KernelPageEntries[index] = frame | PAGE_BIT_PRESENT | PAGE_BIT_READWRITE | PAGE_BIT_USERSUPER;
+		*pPhysOut = frame;
+	}
+	else
+	{
+		//defer the allocation to when it's needed
+		g_KernelPageEntries[index] = PAGE_BIT_DAI | PAGE_BIT_READWRITE | PAGE_BIT_USERSUPER;
 	}
 	
-	MpSetFrame(frame << 12);
-	
-	// Mark this page entry as present, and return its address.
-	g_KernelPageEntries  [index] = frame << 12 | PAGE_BIT_PRESENT | PAGE_BIT_READWRITE | PAGE_BIT_USERSUPER;
 	g_KernelHeapAllocSize[index] = 0;
-	
-	if (pPhysOut)
-		*pPhysOut = frame << 12;
 	
 	uintptr_t returnAddr = (KERNEL_HEAP_BASE + (index << 12));
 	MmInvalidateSinglePage(returnAddr);
@@ -118,14 +138,20 @@ void MhFreePage(void* pPage)
 	
 	uint32_t index = (pAddr - KERNEL_HEAP_BASE) >> 12;
 	
-	// Get the old physical address. We want to remove the frame.
-	uint32_t physicalFrame = g_KernelPageEntries[index] & PAGE_BIT_ADDRESS_MASK;
+	// don't free a page if it was marked as demand-paged but was never actually demanded
+	if (g_KernelPageEntries[index] & PAGE_BIT_PRESENT)
+	{
+		// Get the old physical address. We want to remove the frame.
+		uint32_t physicalFrame = g_KernelPageEntries[index] & PAGE_BIT_ADDRESS_MASK;
+		
+		MpClearFrame(physicalFrame);
+		
+		MmInvalidateSinglePage((uintptr_t)pPage);
+	}
 	
 	// Ok. Free it now
 	g_KernelPageEntries  [index] = 0;
 	g_KernelHeapAllocSize[index] = 0;
-	
-	MpClearFrame(physicalFrame);
 }
 
 void MhFree(void* pPage)
@@ -179,7 +205,7 @@ void* MhAllocate(size_t size, uint32_t* pPhysOut)
 					}
 				}
 				// Nope! We have space here!  Let's map all the pages, and return the address of the first one.
-				LogMsg("Setting up page number %d", i);
+				//LogMsg("Setting up page number %d", i);
 				void* pointer = MhSetupPage(i, pPhysOut);
 				
 				// Not to forget, set the memory allocation size below:
@@ -187,7 +213,7 @@ void* MhAllocate(size_t size, uint32_t* pPhysOut)
 				
 				for (int j = i + 1, k = 1; j < jfinal; j++, k++)
 				{
-					LogMsg("Setting up page number %d", j);
+					//LogMsg("Setting up page number %d", j);
 					uint32_t* pPhysOutNew = pPhysOut;
 					if (pPhysOutNew)
 						pPhysOutNew += k;

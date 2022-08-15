@@ -27,12 +27,6 @@ void MmOnPageFault(Registers *pRegs)
 	
 	//LogMsg("Page fault happened at %x (error code: %x) on Heap %p", pRegs->cr2, pRegs->error_code, pHeap);
 	
-	if (!pHeap)
-	{
-		// Oh, no, we have no heap available, this must mean that this page fault is invalid!
-		goto _INVALID_PAGE_FAULT;
-	}
-	
 	union
 	{
 		struct
@@ -54,55 +48,68 @@ void MmOnPageFault(Registers *pRegs)
 	if (!errorCode.bPresent)
 	{
 		// Wasn't present...
-		uint32_t* pPageEntry = MuGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
+		uint32_t* pPageEntry = NULL;
+		if (pHeap)
+		{
+			pPageEntry = MuGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
+		}
 		if (!pPageEntry)
 		{
-			goto _INVALID_PAGE_FAULT;
+			// Hrm, maybe it's part of the kernel heap, that can be demand-paged too
+			pPageEntry = MhGetPageEntry(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK);
 		}
 		
-		if (*pPageEntry & PAGE_BIT_PRESENT)
+		if (pPageEntry)
 		{
-			// Hrm? But the error code said it wasn't present, whatever
-			return;
-		}
-		
-		if (*pPageEntry & PAGE_BIT_DAI)
-		{
-			//LogMsg("Page not present, allocating...");
-			
-			// It's time to map a page here
-			uint32_t frame = MpFindFreeFrame();
-			
-			if (frame == 0xFFFFFFFF)
+			if (*pPageEntry & PAGE_BIT_PRESENT)
 			{
-				LogMsg("Out of memory, d'oh!");
-				goto _INVALID_PAGE_FAULT;
+				// Hrm? But the error code said it wasn't present, whatever
+				return;
 			}
 			
-			MpSetFrame(frame << 12);
-			
-			*pPageEntry = *pPageEntry & 0xFFF;
-			*pPageEntry |= frame << 12;
-			*pPageEntry |= PAGE_BIT_PRESENT;
-			*pPageEntry &= ~PAGE_BIT_DAI;
-			
-			MmInvalidateSinglePage(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK);
-			
-			// Let's go!
-			return;
+			if (*pPageEntry & PAGE_BIT_DAI)
+			{
+				//LogMsg("Page not present, allocating...");
+				
+				// It's time to map a page here
+				uint32_t frame = MpFindFreeFrame();
+				
+				if (frame == 0xFFFFFFFF)
+				{
+					LogMsg("Out of memory, d'oh!");
+					goto _INVALID_PAGE_FAULT;
+				}
+				
+				MpSetFrame(frame << 12);
+				
+				*pPageEntry = *pPageEntry & 0xFFF;
+				*pPageEntry |= frame << 12;
+				*pPageEntry |= PAGE_BIT_PRESENT;
+				*pPageEntry &= ~PAGE_BIT_DAI;
+				
+				MmInvalidateSinglePage(pRegs->cr2 & PAGE_BIT_ADDRESS_MASK);
+				
+				// Let's go!
+				return;
+			}
 		}
 		
-		// I can't understand?
+		// Uh oh
 		goto _INVALID_PAGE_FAULT;
 	}
 	
 	if (errorCode.bWrite)
 	{
 		// Should be a COW field. Was present...
-		uint32_t* pPageEntry = MuGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
+		uint32_t* pPageEntry = NULL;
+		if (pHeap)
+		{
+			pPageEntry = MuGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
+		}
 		if (!pPageEntry)
 		{
 			// Da hell? But the error code said that the page was present
+			// Kernel heap can't CoW, so fault here
 			goto _INVALID_PAGE_FAULT;
 		}
 		
@@ -138,7 +145,7 @@ void MmOnPageFault(Registers *pRegs)
 	}
 	
 _INVALID_PAGE_FAULT:
-	LogMsg("Invalid page fault at EIP: %x", pRegs->eip);
+	LogMsg("Invalid page fault at EIP: %x. CR2: %x. ErrorCode: %x", pRegs->eip, pRegs->cr2, pRegs->error_code);
 	KeStopSystem();
 }
 

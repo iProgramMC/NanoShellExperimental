@@ -81,6 +81,20 @@ int MpGetNumFreePages()
 	return result;
 }
 
+uintptr_t MpRequestFrame()
+{
+	uint32_t frame = MpFindFreeFrame();
+	if (frame == 0xFFFFFFFFu)
+	{
+		// Out of memory.
+		LogMsg("Out of memory in MpRequestFrame");
+		return 0;
+	}
+	
+	MpSetFrame(frame << 12);
+	return frame << 12;
+}
+
 void MmStartupStuff();
 
 void MpInitialize(multiboot_info_t* mbi)

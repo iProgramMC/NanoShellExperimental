@@ -36,8 +36,21 @@
 // Namespace guide:
 // * Mu = User Heaps
 // * Mh = Kernel Heap
-// * Mp = Physical Memory Manager
+// * Mp = Physical memory manager
+// * Mr = Physical memory Reference counter manager
 // * Mm = Exposed programming interface
+
+typedef struct
+{
+	uint32_t m_refCounts[PAGE_SIZE / sizeof(uint32_t)];
+}
+RefCountTableLevel1;
+
+typedef struct
+{
+	RefCountTableLevel1* m_level1[PAGE_SIZE / sizeof(uint32_t)];
+}
+RefCountTableLevel0;
 
 typedef struct
 {
@@ -63,7 +76,6 @@ STATIC_ASSERT(sizeof(UserHeapAllocChainItem)  == 4096, "This should be 4096 byte
 typedef struct
 {
 	uint32_t m_pageEntries[PAGE_SIZE / 4];
-	uint32_t m_refCounts  [PAGE_SIZE / 4];
 }
 PageTable;
 
@@ -96,6 +108,7 @@ void MpSetFrame  (uint32_t frameAddr);
 void MpClearFrame(uint32_t frameAddr);
 void MpInitialize(multiboot_info_t* pInfo);
 int  MpGetNumFreePages();
+uintptr_t MpRequestFrame();
 
 // Hardware
 void MmTlbInvalidate();
@@ -111,6 +124,7 @@ void* MhAllocateSinglePage(uint32_t* pPhysOut);
 void  MhFreePage(void* pPage);
 void  MhFree(void* pPage);
 void  MhInitialize();
+uint32_t* MhGetPageEntry(uintptr_t address);
 
 // User heap manager
 void MuUseHeap (UserHeap* pHeap);
@@ -133,5 +147,6 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 void MuCreatePageTable(UserHeap *pHeap, int pageTable);
 void MuRemovePageTable(UserHeap *pHeap, int pageTable);
 bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address);
+void MuKillPageEntry(uint32_t* pPageEntry, uintptr_t address);
 
 #endif//_MEMORY_H

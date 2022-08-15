@@ -247,11 +247,7 @@ void MuKillPageTablesEntries(PageTable* pPageTable)
 	{
 		if (pPageTable->m_pageEntries[i] & PAGE_BIT_PRESENT)
 		{
-			uint32_t frame = pPageTable->m_pageEntries[i] & PAGE_BIT_ADDRESS_MASK;
-			
-			MpClearFrame(frame);
-			
-			pPageTable->m_pageEntries[i] = 0;
+			MuKillPageEntry(&pPageTable->m_pageEntries[i], 0);
 		}
 	}
 }
@@ -300,13 +296,8 @@ void MuCreatePageTable(UserHeap *pHeap, int pageTable)
 	pHeap->m_pPageDirectory[pageTable] = 0;
 	
 	// Create a new page table page on the kernel heap.
-	uint32_t physOut[2];//don't actually care about the second page, but we need it
-	
-	pHeap->m_pPageTables[pageTable] = MhAllocate(PAGE_SIZE * 2, physOut);
-	
-	pHeap->m_pPageDirectory[pageTable] = physOut[0];
-	
-	memset(pHeap->m_pPageTables[pageTable], 0, PAGE_SIZE * 2);
+	pHeap->m_pPageTables[pageTable] = MhAllocateSinglePage(&pHeap->m_pPageDirectory[pageTable]);
+	memset(pHeap->m_pPageTables[pageTable], 0, PAGE_SIZE);
 	
 	// Assign its bits, too.
 	pHeap->m_pPageDirectory[pageTable] |= PAGE_BIT_PRESENT | PAGE_BIT_READWRITE;
@@ -347,6 +338,11 @@ uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePag
 	addressSplit.address = address;
 	
 	// Is there a page table there?
+	if (addressSplit.pageTable >= 0x200) // is in the kernel's half
+	{
+		return NULL;
+	}
+	
 	if (!pHeap->m_pPageTables[addressSplit.pageTable])
 	{
 		// No. Create one if needed.
@@ -405,6 +401,23 @@ bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, b
 	return true;
 }
 
+void MuKillPageEntry(uint32_t* pPageEntry, uintptr_t address)
+{
+	if ((*pPageEntry & PAGE_BIT_PRESENT) && !(*pPageEntry & PAGE_BIT_COW))
+	{
+		uint32_t memFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
+		
+		if (!(*pPageEntry & PAGE_BIT_MMIO))
+			MpClearFrame(memFrame);
+		
+		// Remove it!!!
+		*pPageEntry = 0;
+		
+		if (address)
+			MmInvalidateSinglePage(address);
+	}
+}
+
 bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address)
 {
 	uint32_t* pPageEntry = MuGetPageEntryAt(pHeap, address, false);
@@ -416,17 +429,7 @@ bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address)
 	}
 	
 	// A page entry was allocated here, and it has been copied-on-write
-	if ((*pPageEntry & PAGE_BIT_PRESENT) && !(*pPageEntry & PAGE_BIT_COW))
-	{
-		uint32_t memFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
-		
-		if (!(*pPageEntry & PAGE_BIT_MMIO))
-			MpClearFrame(memFrame);
-		
-		// Remove it!!!
-		*pPageEntry = 0;
-		MmInvalidateSinglePage(address);
-	}
+	MuKillPageEntry (pPageEntry, address);
 	
 	return true;
 }
@@ -510,23 +513,12 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 		if (pPhysicalAddresses)
 		{
 			*pPageEntry = (pPhysicalAddresses[numPagesMappedSoFar]) & PAGE_BIT_ADDRESS_MASK;
+			*pPageEntry |= PAGE_BIT_PRESENT;
 		}
 		else
 		{
-			/*
-			uint32_t FreeFrame = MpFindFreeFrame();
-			
-			// if out of memory, roll back the mapping
-			if (FreeFrame == 0xFFFFFFFF)
-				goto _rollback;
-			
-			MpSetFrame(FreeFrame << 12);
-			
-			*pPageEntry = FreeFrame << 12;*/
+			*pPageEntry |= PAGE_BIT_DAI;
 		}
-		
-		//*pPageEntry |= PAGE_BIT_PRESENT;
-		*pPageEntry |= PAGE_BIT_DAI;
 		
 		if (bReadWrite)
 			*pPageEntry |= PAGE_BIT_READWRITE;
