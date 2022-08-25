@@ -12,6 +12,11 @@
 #include <memory.h>
 #include <string.h>
 
+// THREADING: These functions are currently thread-unsafe. Please use
+// the wrapper functions (will be added eventually instead).
+// In the NanoShell backport of the memory manager, these functions
+// will not be made available to the user, so use Mm* functions instead.
+
 UserHeap* g_pCurrentUserHeap;
 
 UserHeap* MuGetCurrentHeap()
@@ -30,7 +35,6 @@ UserHeap* MuCreateHeap()
 	pHeap->m_nPageDirectory  = 0;
 	pHeap->m_nMappingHint    = USER_HEAP_BASE;
 	pHeap->m_pPageDirectory  = MhAllocateSinglePage(&pHeap->m_nPageDirectory);
-	pHeap->m_pAllocations    = NULL;
 	
 	memset(pHeap->m_pPageDirectory, 0, PAGE_SIZE);
 	
@@ -41,137 +45,6 @@ UserHeap* MuCreateHeap()
 	memset(pHeap->m_pPageTables, 0, sizeof(pHeap->m_pPageTables));
 	
 	return pHeap;
-}
-
-void MuFreeHeapAllocChain(UserHeapAllocChainItem* pChain)
-{
-	while (pChain)
-	{
-		UserHeapAllocChainItem* pThis = pChain;
-		pChain = pChain->pNext;
-		MhFree(pThis);
-	}
-}
-
-// This method of keeping track of mappings is kind of naive, in that we use a linear search rather than a binary search, this could get messy quickly
-
-// Adds a mapping to the heap's list of mappings. Allows us to use munmap() and only specify the starting address of the mapping.
-void MuAddMappingToHeapsList(UserHeap *pHeap, void *pStart, size_t numPages)
-{
-	// If the heap list is NULL, start off with one chain element
-	if (!pHeap->m_pAllocations)
-	{
-		pHeap->m_pAllocations = MhAllocateSinglePage(NULL);
-		memset (pHeap->m_pAllocations, 0, PAGE_SIZE);
-	}
-	
-	// Look through the allocation table and see what allocation spot is free
-	UserHeapAllocChainItem *pItem = pHeap->m_pAllocations;
-	
-	if (!pItem)
-	{
-		// Hrm. But we just allocated something, mayhaps it didn't work?
-		LogMsg("pHeap->m_pAllocations allocation didn't work (%s:%d)", __FILE__, __LINE__);
-		KeStopSystem();
-	}
-	
-	while (true)
-	{
-		// 511 on i686, 255 on x86_64. Don't actually care about x86_64, just wanted to point it out
-		for (size_t i = 0; i < ARRAY_COUNT (pItem->m_allocs); i++)
-		{
-			if (pItem->m_allocs[i].m_pAddr == NULL)
-			{
-				// we've found a free spot!!
-				pItem->m_allocs[i].m_pAddr  = pStart;
-				pItem->m_allocs[i].m_nPages = numPages;
-				return;
-			}
-		}
-		
-		if (!pItem->pNext) break; //we'll use the last element anyway
-		
-		pItem = pItem->pNext;
-	}
-	
-	// We have NOT found a new spot... let's allocate one!
-	UserHeapAllocChainItem* pNewItem = MhAllocateSinglePage(NULL);
-	memset (pNewItem, 0, PAGE_SIZE);
-	
-	pItem->pNext = pNewItem;
-	
-	// Now, use the first slot (guaranteedly empty) to put our new allocation in
-	pNewItem->m_allocs[0].m_pAddr  = pStart;
-	pNewItem->m_allocs[0].m_nPages = numPages;
-}
-
-bool MuIsMappingOnHeapsList(UserHeap *pHeap, void *pStart, UserHeapAllocChainItem** pOutItem, int *pOutIndex)
-{
-	// Look through the allocation table and see what allocation spot has it
-	UserHeapAllocChainItem *pItem = pHeap->m_pAllocations;
-	
-	if (pOutItem)  *pOutItem  = NULL;
-	if (pOutIndex) *pOutIndex = 0;
-	
-	if (!pItem)
-	{
-		//We have no logged allocations, I guess?
-		return false;
-	}
-	
-	while (pItem)
-	{
-		for (size_t i = 0; i < ARRAY_COUNT (pItem->m_allocs); i++)
-		{
-			if (pItem->m_allocs[i].m_pAddr == pStart)
-			{
-				// It is on The List.
-				if (pOutItem)  *pOutItem  = pItem;
-				if (pOutIndex) *pOutIndex = i;
-				return true;
-			}
-		}
-		
-		pItem = pItem->pNext;
-	}
-	
-	// No, it's not on The List
-	return false;
-}
-
-void MuDebugLogHeapList(UserHeap *pHeap)
-{
-	UserHeapAllocChainItem *pItem = pHeap->m_pAllocations;
-	
-	while (pItem)
-	{
-		for (size_t i = 0; i < ARRAY_COUNT (pItem->m_allocs); i++)
-		{
-			if (pItem->m_allocs[i].m_pAddr)
-			{
-				LogMsg("Allocation: %p. Size in pages: %d (%x)", pItem->m_allocs[i].m_pAddr, pItem->m_allocs[i].m_nPages, pItem->m_allocs[i].m_nPages);
-			}
-		}
-		
-		pItem = pItem->pNext;
-	}
-}
-
-// An automatic version. Won't use this in MuUnMap because we output stuff already in MuIsMappingOnHeapsList
-bool MuRemoveMappingFromList(UserHeap *pHeap, void *pStart)
-{
-	UserHeapAllocChainItem* pItem = NULL; int nIndex = 0;
-	
-	if (!MuIsMappingOnHeapsList(pHeap, pStart, &pItem, &nIndex))
-	{
-		LogMsg("Could not remove mapping started at %p", pStart);
-		return false;
-	}
-	
-	pItem->m_allocs[nIndex].m_pAddr  = NULL;
-	pItem->m_allocs[nIndex].m_nPages = 0;
-	
-	return true;
 }
 
 // Creates a new structure and copies all of the pages of the previous one. Uses COW to achieve this.
@@ -285,9 +158,6 @@ void MuKillHeap(UserHeap* pHeap)
 			}
 		}
 		
-		// Should be good to go.  Free the page directory, and then the heap itself
-		MuFreeHeapAllocChain(pHeap->m_pAllocations);
-		
 		MhFree(pHeap->m_pPageDirectory);
 		MhFree(pHeap);
 	}
@@ -394,7 +264,7 @@ bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, b
 		if (bReadWrite)
 			*pPageEntry |= PAGE_BIT_READWRITE;
 		
-		LogMsg("Adding reference");
+		SLogMsg("Adding reference");
 		
 		MrReferencePage(physAddress);
 	}
@@ -405,8 +275,6 @@ bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, b
 	
 	// WORK: This might not actually be needed if TLB doesn't actually cache non-present pages. Better to be on the safe side, though
 	MmInvalidateSinglePage(address);
-	
-	MuAddMappingToHeapsList(pHeap, (void*)address, 1);
 	
 	return true;
 }
@@ -542,10 +410,7 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 		MmInvalidateSinglePage(hint + numPagesMappedSoFar * PAGE_SIZE);
 	}
 	
-	// Seems to have succeeded. Add it to The (mapping) List.
-	
-	MuAddMappingToHeapsList(pHeap, (void*)hint, numPages);
-	
+	// Seems to have succeeded.
 	return true;
 	
 _rollback:

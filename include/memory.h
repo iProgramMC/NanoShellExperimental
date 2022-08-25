@@ -54,27 +54,6 @@ RefCountTableLevel0;
 
 typedef struct
 {
-	void * m_pAddr;
-	size_t m_nPages;
-}
-UserHeapAlloc;
-
-typedef struct tagUserHeapAllocChainItem
-{
-	struct tagUserHeapAllocChainItem* pNext;
-	
-	size_t padding; //on 64-bit, UserHeapAlloc would be 16 bytes
-	
-	// each structure is able to hold 511 alloc entries
-	UserHeapAlloc m_allocs[(PAGE_SIZE / sizeof(UserHeapAlloc)) - 1];
-}
-UserHeapAllocChainItem;
-
-
-STATIC_ASSERT(sizeof(UserHeapAllocChainItem)  == 4096, "This should be 4096 bytes");
-
-typedef struct
-{
 	uint32_t m_pageEntries[PAGE_SIZE / 4];
 }
 PageTable;
@@ -88,11 +67,6 @@ typedef struct UserHeap
 	uint32_t   m_nPageDirectory;   // The physical address of the page directory
 	PageTable* m_pPageTables[512]; // The user half's page tables referenced by the page directory.
 	uint32_t   m_nMappingHint;     // The hint to use when mapping with no hint next.
-	
-	// This is a dynamic array storing all the allocations that have been added using
-	// operations such as MuMapMemory. When it's time to MuUnMap(pAddr), unmap it all,
-	// not just one page.
-	UserHeapAllocChainItem* m_pAllocations;
 }
 UserHeap;
 

@@ -109,10 +109,6 @@ void MuTest()
 	*((uint32_t*)0x12345678) = 0x13371337;
 	LogMsg("Wrote");
 	
-	LogMsg("Logging heap list:");
-	MuDebugLogHeapList(pHeap);
-	LogMsg("Logging heap list Done");
-	
 	//MuRemoveMapping (pHeap, 0x12345000, true);
 	
 	//we can still read it from 0xC0400000
@@ -140,10 +136,6 @@ void MuTest()
 		MuTestWriteAll((uint8_t*)pMemory, 8*PAGE_SIZE);
 		LogMsg("Done. Any errors? Don't think so.");
 	}
-	
-	LogMsg("Logging heap list:");
-	MuDebugLogHeapList(pHeap);
-	LogMsg("Logging heap list Done");
 	
 	// Clone the heap.
 	UserHeap *pNewHeap = MuCloneHeap(pHeap);
