@@ -31,6 +31,7 @@
 
 #include <main.h>
 #include <multiboot.h>
+#include <lock.h>
 #include <idt.h>
 
 // Namespace guide:
@@ -61,6 +62,8 @@ PageTable;
 // User heap structure
 typedef struct UserHeap
 {
+	SafeLock   m_lock;             // The lock associated with this heap object
+	
 	int        m_nRefCount;        // The reference count. If it goes to zero, this gets killed
 	
 	uint32_t*  m_pPageDirectory;   // The virtual  address of the page directory
@@ -102,12 +105,10 @@ uint32_t* MhGetPageEntry(uintptr_t address);
 // User heap manager
 void MuUseHeap (UserHeap* pHeap);
 void MuResetHeap();
-
 UserHeap* MuCreateHeap();
 UserHeap* MuGetCurrentHeap();
 UserHeap* MuCloneHeap(UserHeap* pHeapToClone);
 void MuKillHeap(UserHeap *pHeap);
-void MuDebugLogHeapList(UserHeap *pHeap);
 uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable);
 bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, bool bReadWrite);
 bool MuAreMappingParmsValid(uintptr_t start, size_t nPages);
@@ -115,11 +116,8 @@ bool MuIsMappingFree(UserHeap *pHeap, uintptr_t start, size_t nPages);
 bool MuMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO);
 bool MuMapMemoryNonFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO);
 bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, bool bReadWrite, bool bAllowClobbering, bool bIsMMIO);
-
-// Functions that really shouldn't be used
 void MuCreatePageTable(UserHeap *pHeap, int pageTable);
 void MuRemovePageTable(UserHeap *pHeap, int pageTable);
 bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address);
-void MuKillPageEntry(uint32_t* pPageEntry, uintptr_t address);
 
 #endif//_MEMORY_H

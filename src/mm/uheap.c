@@ -7,19 +7,16 @@
 //  Programmer(s):  iProgramInCpp (iprogramincpp@gmail.com)
 //  ***************************************************************
 
-// Namespace: Mu (Memory manager, User heap)
+// Namespace: Mui (Memory manager, User heap, Internal)
+// Namespace: Mu (Memory manager, User heap, Exposed)
 
 #include <memory.h>
 #include <string.h>
 
-// THREADING: These functions are currently thread-unsafe. Please use
-// the wrapper functions (will be added eventually instead).
-// In the NanoShell backport of the memory manager, these functions
-// will not be made available to the user, so use Mm* functions instead.
-
+// THREADING: These functions are currently thread-unsafe. Please use the wrapper functions.
 UserHeap* g_pCurrentUserHeap;
 
-UserHeap* MuGetCurrentHeap()
+UserHeap* MuiGetCurrentHeap()
 {
 	return g_pCurrentUserHeap;
 }
@@ -35,6 +32,8 @@ UserHeap* MuCreateHeap()
 	pHeap->m_nPageDirectory  = 0;
 	pHeap->m_nMappingHint    = USER_HEAP_BASE;
 	pHeap->m_pPageDirectory  = MhAllocateSinglePage(&pHeap->m_nPageDirectory);
+	pHeap->m_lock.m_held     = false;
+	pHeap->m_lock.m_task_owning_it = NULL;
 	
 	memset(pHeap->m_pPageDirectory, 0, PAGE_SIZE);
 	
@@ -47,11 +46,115 @@ UserHeap* MuCreateHeap()
 	return pHeap;
 }
 
+void MuiCreatePageTable(UserHeap *pHeap, int pageTable)
+{
+	// Reset the page table there.
+	pHeap->m_pPageDirectory[pageTable] = 0;
+	
+	// Create a new page table page on the kernel heap.
+	pHeap->m_pPageTables[pageTable] = MhAllocateSinglePage(&pHeap->m_pPageDirectory[pageTable]);
+	memset(pHeap->m_pPageTables[pageTable], 0, PAGE_SIZE);
+	
+	// Assign its bits, too.
+	pHeap->m_pPageDirectory[pageTable] |= PAGE_BIT_PRESENT | PAGE_BIT_READWRITE;
+}
+
+void MuiKillPageEntry(uint32_t* pPageEntry, uintptr_t address)
+{
+	if (*pPageEntry & PAGE_BIT_PRESENT)
+	{
+		uint32_t memFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
+		
+		if (!(*pPageEntry & PAGE_BIT_MMIO))
+		{
+			MpClearFrame(memFrame);
+			MrUnreferencePage(memFrame);
+		}
+		
+		// Remove it!!!
+		*pPageEntry = 0;
+		
+		if (address)
+			MmInvalidateSinglePage(address);
+	}
+}
+
+void MuiKillPageTablesEntries(PageTable* pPageTable)
+{
+	// Free each of the pages, if there are any
+	for (int i = 0; i < 0x400; i++)
+	{
+		if (pPageTable->m_pageEntries[i] & PAGE_BIT_PRESENT)
+		{
+			MuiKillPageEntry(&pPageTable->m_pageEntries[i], 0);
+		}
+	}
+}
+
+void MuiRemovePageTable(UserHeap *pHeap, int pageTable)
+{
+	// If we have a page table there...
+	if (pHeap->m_pPageTables[pageTable])
+	{
+		MuiKillPageTablesEntries(pHeap->m_pPageTables[pageTable]);
+		
+		// reset it to zero
+		pHeap->m_pPageDirectory[pageTable] = 0;
+		
+		// Get rid of the page we've allocated for it.
+		MhFree(pHeap->m_pPageTables[pageTable]);
+		pHeap->m_pPageTables[pageTable] = NULL;
+	}
+}
+
+uint32_t* MuiGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable)
+{
+	// Split the address up into chunks
+	union
+	{
+		struct
+		{
+			uint32_t pageOffset: 12; //won't use this, it's there just to offset by 12 bytes
+			uint32_t pageEntry : 10;
+			uint32_t pageTable : 10;
+		};
+		uintptr_t address;
+	}
+	addressSplit;
+	
+	addressSplit.address = address;
+	
+	// Is there a page table there?
+	if (addressSplit.pageTable >= 0x200) // is in the kernel's half
+	{
+		return NULL;
+	}
+	
+	if (!pHeap->m_pPageTables[addressSplit.pageTable])
+	{
+		// No. Create one if needed.
+		if (bGeneratePageTable)
+			MuiCreatePageTable(pHeap, addressSplit.pageTable);
+		else
+			return NULL;
+	}
+	
+	if (!pHeap->m_pPageTables[addressSplit.pageTable])
+	{
+		// Still not? Guess something failed then.
+		return NULL;
+	}
+	
+	// Alright, grab a reference to the page entry, and return it.
+	uint32_t* pPageEntry = &pHeap->m_pPageTables[addressSplit.pageTable]->m_pageEntries[addressSplit.pageEntry];
+	return pPageEntry;
+}
+
 // Creates a new structure and copies all of the pages of the previous one. Uses COW to achieve this.
 // (Unfortunately, this won't work on the i386 itself, but works on i486 and up, and I'm not sure we
 //  can get this running on an i386 without some hacks to get around the lack of a boot loader)
 // TODO: Allow a compiler switch to disable CoW in case something weird was found that makes it impossible
-UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
+UserHeap* MuiCloneHeap(UserHeap* pHeapToClone)
 {
 	UserHeap *pHeap = MuCreateHeap();
 	
@@ -65,8 +168,8 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 			for (int entry = 0x000; entry < 0x400; entry++)
 			{
 				uintptr_t vAddr = i << 22 | entry << 12;
-				uint32_t* pEntryDst = MuGetPageEntryAt(pHeap,        vAddr, true);
-				uint32_t* pEntrySrc = MuGetPageEntryAt(pHeapToClone, vAddr, true);
+				uint32_t* pEntryDst = MuiGetPageEntryAt(pHeap,        vAddr, true);
+				uint32_t* pEntrySrc = MuiGetPageEntryAt(pHeapToClone, vAddr, true);
 				
 				if (*pEntrySrc & PAGE_BIT_DAI)
 				{
@@ -124,19 +227,8 @@ UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
 	return pHeap;
 }
 
-void MuKillPageTablesEntries(PageTable* pPageTable)
-{
-	// Free each of the pages, if there are any
-	for (int i = 0; i < 0x400; i++)
-	{
-		if (pPageTable->m_pageEntries[i] & PAGE_BIT_PRESENT)
-		{
-			MuKillPageEntry(&pPageTable->m_pageEntries[i], 0);
-		}
-	}
-}
-
-void MuKillHeap(UserHeap* pHeap)
+// Returns whether the thread has been destroyed or not
+bool MuiKillHeap(UserHeap* pHeap)
 {
 	pHeap->m_nRefCount--;
 	if (pHeap->m_nRefCount < 0)
@@ -154,95 +246,27 @@ void MuKillHeap(UserHeap* pHeap)
 		{
 			if (pHeap->m_pPageTables[i])
 			{
-				MuRemovePageTable(pHeap, i);
+				MuiRemovePageTable(pHeap, i);
 			}
 		}
 		
 		MhFree(pHeap->m_pPageDirectory);
 		MhFree(pHeap);
+		
+		return true;
 	}
 	else
 	{
 		SLogMsg("Heap %p won't die yet, because it's reference count is %d!", pHeap, pHeap->m_nRefCount);
-	}
-}
-
-void MuCreatePageTable(UserHeap *pHeap, int pageTable)
-{
-	// Reset the page table there.
-	pHeap->m_pPageDirectory[pageTable] = 0;
-	
-	// Create a new page table page on the kernel heap.
-	pHeap->m_pPageTables[pageTable] = MhAllocateSinglePage(&pHeap->m_pPageDirectory[pageTable]);
-	memset(pHeap->m_pPageTables[pageTable], 0, PAGE_SIZE);
-	
-	// Assign its bits, too.
-	pHeap->m_pPageDirectory[pageTable] |= PAGE_BIT_PRESENT | PAGE_BIT_READWRITE;
-}
-
-void MuRemovePageTable(UserHeap *pHeap, int pageTable)
-{
-	// If we have a page table there...
-	if (pHeap->m_pPageTables[pageTable])
-	{
-		MuKillPageTablesEntries(pHeap->m_pPageTables[pageTable]);
 		
-		// reset it to zero
-		pHeap->m_pPageDirectory[pageTable] = 0;
-		
-		// Get rid of the page we've allocated for it.
-		MhFree(pHeap->m_pPageTables[pageTable]);
-		pHeap->m_pPageTables[pageTable] = NULL;
+		return false;
 	}
-}
-
-uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable)
-{
-	// Split the address up into chunks
-	union
-	{
-		struct
-		{
-			uint32_t pageOffset: 12; //won't use this, it's there just to offset by 12 bytes
-			uint32_t pageEntry : 10;
-			uint32_t pageTable : 10;
-		};
-		uintptr_t address;
-	}
-	addressSplit;
-	
-	addressSplit.address = address;
-	
-	// Is there a page table there?
-	if (addressSplit.pageTable >= 0x200) // is in the kernel's half
-	{
-		return NULL;
-	}
-	
-	if (!pHeap->m_pPageTables[addressSplit.pageTable])
-	{
-		// No. Create one if needed.
-		if (bGeneratePageTable)
-			MuCreatePageTable(pHeap, addressSplit.pageTable);
-		else
-			return NULL;
-	}
-	
-	if (!pHeap->m_pPageTables[addressSplit.pageTable])
-	{
-		// Still not? Guess something failed then.
-		return NULL;
-	}
-	
-	// Alright, grab a reference to the page entry, and return it.
-	uint32_t* pPageEntry = &pHeap->m_pPageTables[addressSplit.pageTable]->m_pageEntries[addressSplit.pageEntry];
-	return pPageEntry;
 }
 
 // Create a mapping at `address` to point to `physAddress` in the user heap `pHeap`.
-bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, bool bReadWrite)
+bool MuiCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, bool bReadWrite)
 {
-	uint32_t* pPageEntry = MuGetPageEntryAt(pHeap, address, true);
+	uint32_t* pPageEntry = MuiGetPageEntryAt(pHeap, address, true);
 	
 	if (!pPageEntry)
 	{
@@ -279,29 +303,9 @@ bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, b
 	return true;
 }
 
-void MuKillPageEntry(uint32_t* pPageEntry, uintptr_t address)
+bool MuiRemoveMapping(UserHeap *pHeap, uintptr_t address)
 {
-	if (*pPageEntry & PAGE_BIT_PRESENT)
-	{
-		uint32_t memFrame = *pPageEntry & PAGE_BIT_ADDRESS_MASK;
-		
-		if (!(*pPageEntry & PAGE_BIT_MMIO))
-		{
-			MpClearFrame(memFrame);
-			MrUnreferencePage(memFrame);
-		}
-		
-		// Remove it!!!
-		*pPageEntry = 0;
-		
-		if (address)
-			MmInvalidateSinglePage(address);
-	}
-}
-
-bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address)
-{
-	uint32_t* pPageEntry = MuGetPageEntryAt(pHeap, address, false);
+	uint32_t* pPageEntry = MuiGetPageEntryAt(pHeap, address, false);
 	
 	if (!pPageEntry)
 	{
@@ -310,7 +314,7 @@ bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address)
 	}
 	
 	// A page entry was allocated here, and it has been copied-on-write
-	MuKillPageEntry (pPageEntry, address);
+	MuiKillPageEntry (pPageEntry, address);
 	
 	return true;
 }
@@ -330,14 +334,14 @@ bool MuAreMappingParmsValid(uintptr_t start, size_t nPages)
 }
 
 // Checks if a continuous chain of mappings is free.
-bool MuIsMappingFree(UserHeap *pHeap, uintptr_t start, size_t nPages)
+bool MuiIsMappingFree(UserHeap *pHeap, uintptr_t start, size_t nPages)
 {
 	if (!MuAreMappingParmsValid (start, nPages))
 		return false;
 	
 	for (size_t i = 0; i < nPages; i++)
 	{
-		uint32_t* pPageEntry = MuGetPageEntryAt(pHeap, start + i * PAGE_SIZE, false);
+		uint32_t* pPageEntry = MuiGetPageEntryAt(pHeap, start + i * PAGE_SIZE, false);
 		
 		// assume that it's free if that's null
 		if (pPageEntry)
@@ -352,7 +356,7 @@ bool MuIsMappingFree(UserHeap *pHeap, uintptr_t start, size_t nPages)
 // Maps a chunk of memory, and forces a hint. If pPhysicalAddresses is null, allocate NEW pages.
 // Otherwise, pPhysicalAddresses is treated as an ARRAY of physical page addresses of size `numPages`.
 // If `bAllowClobbering` is on, all the previous mappings will be discarded. Dangerous!
-bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, bool bReadWrite, bool bAllowClobbering, bool bIsMMIO)
+bool MuiMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, bool bReadWrite, bool bAllowClobbering, bool bIsMMIO)
 {
 	if (bIsMMIO && !pPhysicalAddresses)
 	{
@@ -368,7 +372,7 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 	}
 	else
 	{
-		if (!MuIsMappingFree(pHeap, hint, numPages))
+		if (!MuiIsMappingFree(pHeap, hint, numPages))
 			// can't map here!
 			return false;
 	}
@@ -377,7 +381,7 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 	size_t numPagesMappedSoFar = 0;
 	for (numPagesMappedSoFar = 0; numPagesMappedSoFar < numPages; numPagesMappedSoFar++)
 	{
-		uint32_t* pPageEntry = MuGetPageEntryAt(pHeap, hint + numPagesMappedSoFar * PAGE_SIZE, true);
+		uint32_t* pPageEntry = MuiGetPageEntryAt(pHeap, hint + numPagesMappedSoFar * PAGE_SIZE, true);
 		if (!pPageEntry)
 			goto _rollback;
 		
@@ -388,7 +392,7 @@ bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint
 				goto _rollback;
 			
 			// Reset it
-			MuRemoveMapping(pHeap, hint + numPagesMappedSoFar * PAGE_SIZE); 
+			MuiRemoveMapping(pHeap, hint + numPagesMappedSoFar * PAGE_SIZE); 
 		}
 		
 		if (pPhysicalAddresses)
@@ -417,13 +421,13 @@ _rollback:
 	// Roll back our changes in case something went wrong during the mapping process
 	for (size_t i = 0; i < numPagesMappedSoFar; i++)
 	{
-		MuRemoveMapping(pHeap, hint + i * PAGE_SIZE);
+		MuiRemoveMapping(pHeap, hint + i * PAGE_SIZE);
 	}
 	
 	return false;
 }
 
-uintptr_t MuFindPlaceAroundHint(UserHeap *pHeap, uintptr_t hint, size_t numPages)
+uintptr_t MuiFindPlaceAroundHint(UserHeap *pHeap, uintptr_t hint, size_t numPages)
 {
 	//OPTIMIZE oh come on, optimize this - iProgramInCpp
 	
@@ -431,14 +435,14 @@ uintptr_t MuFindPlaceAroundHint(UserHeap *pHeap, uintptr_t hint, size_t numPages
 	uintptr_t end = KERNEL_HEAP_BASE - numPages;
 	for (uintptr_t searchHead = hint; searchHead < end; searchHead++)
 	{
-		if (MuIsMappingFree(pHeap, searchHead, numPages))
+		if (MuiIsMappingFree(pHeap, searchHead, numPages))
 			return searchHead;
 	}
 	
 	//start from the user heap base address
 	for (uintptr_t searchHead = USER_HEAP_BASE; searchHead < hint; searchHead++)
 	{
-		if (MuIsMappingFree(pHeap, searchHead, numPages))
+		if (MuiIsMappingFree(pHeap, searchHead, numPages))
 			return searchHead;
 	}
 	
@@ -447,24 +451,24 @@ uintptr_t MuFindPlaceAroundHint(UserHeap *pHeap, uintptr_t hint, size_t numPages
 }
 
 // Maps a chunk of memory with a hint address, but not fixed, so it can diverge a little bit.
-bool MuMapMemoryNonFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO)
+bool MuiMapMemoryNonFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO)
 {
 	// find a place to map, based on the hint
-	uintptr_t newHint = MuFindPlaceAroundHint(pHeap, hint, numPages);
+	uintptr_t newHint = MuiFindPlaceAroundHint(pHeap, hint, numPages);
 	
 	if (newHint == 0) return false;
 	
 	*pAddressOut = (void*)newHint;
 	
-	return MuMapMemoryFixedHint(pHeap, newHint, numPages, pPhysicalAddresses, bReadWrite, false, bIsMMIO);
+	return MuiMapMemoryFixedHint(pHeap, newHint, numPages, pPhysicalAddresses, bReadWrite, false, bIsMMIO);
 }
 
 // Maps a chunk a memory without a hint address.
-bool MuMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO)
+bool MuiMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO)
 {
 	void* address;
 	
-	bool bResult = MuMapMemoryNonFixedHint(pHeap, pHeap->m_nMappingHint, numPages, pPhysicalAddresses, &address, bReadWrite, bIsMMIO);
+	bool bResult = MuiMapMemoryNonFixedHint(pHeap, pHeap->m_nMappingHint, numPages, pPhysicalAddresses, &address, bReadWrite, bIsMMIO);
 	if (!bResult)
 		return false;
 	
@@ -500,4 +504,99 @@ void MuResetHeap()
 	g_pCurrentUserHeap = NULL;
 	
 	MmUsePageDirectory((uintptr_t)g_KernelPageDirectory - KERNEL_BASE_ADDRESS);
+}
+
+
+// THREAD-SAFE WRAPPERS
+UserHeap* MuGetCurrentHeap()
+{
+	return MuiGetCurrentHeap();
+}
+
+UserHeap* MuCloneHeap(UserHeap* pHeapToClone)
+{
+	// Lock the heap to clone's lock
+	LockAcquire (&pHeapToClone->m_lock);
+	
+	UserHeap* pClonedHeap = MuiCloneHeap (pHeapToClone);
+	
+	LockFree (&pHeapToClone->m_lock);
+	return pClonedHeap;
+}
+
+void MuKillHeap(UserHeap *pHeap)
+{
+	LockAcquire (&pHeap->m_lock);
+	if (!MuiKillHeap(pHeap))
+		LockFree(&pHeap->m_lock);
+}
+
+uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable)
+{
+	LockAcquire (&pHeap->m_lock);
+	uint32_t* ptr = MuiGetPageEntryAt(pHeap, address, bGeneratePageTable);
+	LockFree (&pHeap->m_lock);
+	return ptr;
+}
+
+bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, bool bReadWrite)
+{
+	LockAcquire (&pHeap->m_lock);
+	bool res = MuiCreateMapping(pHeap, address, physAddress, bReadWrite);
+	LockFree (&pHeap->m_lock);
+	return res;
+}
+
+bool MuIsMappingFree(UserHeap *pHeap, uintptr_t start, size_t nPages)
+{
+	LockAcquire (&pHeap->m_lock);
+	bool res = MuiIsMappingFree(pHeap, start, nPages);
+	LockFree (&pHeap->m_lock);
+	return res;
+}
+
+bool MuMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO)
+{
+	LockAcquire (&pHeap->m_lock);
+	bool res = MuiMapMemory(pHeap, numPages, pPhysicalAddresses, pAddressOut, bReadWrite, bIsMMIO);
+	LockFree (&pHeap->m_lock);
+	return res;
+}
+
+bool MuMapMemoryNonFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO)
+{
+	LockAcquire (&pHeap->m_lock);
+	bool res = MuiMapMemoryNonFixedHint(pHeap, hint, numPages, pPhysicalAddresses, pAddressOut, bReadWrite, bIsMMIO);
+	LockFree (&pHeap->m_lock);
+	return res;
+}
+
+bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, bool bReadWrite, bool bAllowClobbering, bool bIsMMIO)
+{
+	LockAcquire (&pHeap->m_lock);
+	bool res = MuiMapMemoryFixedHint(pHeap, hint, numPages, pPhysicalAddresses, bReadWrite, bAllowClobbering, bIsMMIO);
+	LockFree (&pHeap->m_lock);
+	return res;
+}
+
+void MuCreatePageTable(UserHeap *pHeap, int pageTable)
+{
+	LockAcquire (&pHeap->m_lock);
+	MuiCreatePageTable(pHeap, pageTable);
+	LockFree (&pHeap->m_lock);
+}
+
+void MuRemovePageTable(UserHeap *pHeap, int pageTable)
+{
+	LockAcquire (&pHeap->m_lock);
+	MuiRemovePageTable(pHeap, pageTable);
+	LockFree (&pHeap->m_lock);
+}
+
+bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address)
+{
+	LockAcquire (&pHeap->m_lock);
+	bool res = MuiRemoveMapping(pHeap, address);
+	LockFree (&pHeap->m_lock);
+	return res;
 }

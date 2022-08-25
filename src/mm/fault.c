@@ -34,6 +34,8 @@ int MmGetNumPageFaults()
 	return g_nPageFaultsSoFar;
 }
 
+uint32_t* MuiGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable);
+
 void MmOnPageFault(Registers *pRegs)
 {
 	g_nPageFaultsSoFar++;
@@ -67,7 +69,7 @@ void MmOnPageFault(Registers *pRegs)
 		bool bIsKernelHeap = false;
 		if (pHeap)
 		{
-			pPageEntry = MuGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
+			pPageEntry = MuiGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
 		}
 		if (!pPageEntry)
 		{
@@ -121,7 +123,7 @@ void MmOnPageFault(Registers *pRegs)
 		uint32_t* pPageEntry = NULL;
 		if (pHeap)
 		{
-			pPageEntry = MuGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
+			pPageEntry = MuiGetPageEntryAt(pHeap, pRegs->cr2 & PAGE_BIT_ADDRESS_MASK, false);
 		}
 		if (!pPageEntry)
 		{
