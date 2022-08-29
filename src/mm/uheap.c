@@ -230,6 +230,13 @@ UserHeap* MuiCloneHeap(UserHeap* pHeapToClone)
 // Returns whether the thread has been destroyed or not
 bool MuiKillHeap(UserHeap* pHeap)
 {
+	if (g_pCurrentUserHeap == pHeap)
+	{
+		LogMsg("ERROR: Not allowed to delete currently used heap!");
+		SLogMsg("ERROR: Not allowed to delete currently used heap!");
+		KeStopSystem();
+	}
+	
 	pHeap->m_nRefCount--;
 	if (pHeap->m_nRefCount < 0)
 	{
@@ -484,12 +491,39 @@ bool MuiMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses
 }
 
 // Unmaps a chunk of memory that has been mapped.
+bool MuiUnMap (UserHeap *pHeap, uintptr_t mem, size_t numPages)
+{
+	ASSERT((mem & (PAGE_SIZE - 1)) == 0 && "The memory address passed in must be aligned with the page size.");
+	
+	// You can't unmap kernel space addresses from user heap functions..
+	if (mem >= KERNEL_BASE_ADDRESS || (mem + numPages) >= KERNEL_BASE_ADDRESS)
+	{
+		return false;
+	}
+	
+	// It is not an error if the indicated range does not contain any mapped pages.
+	
+	for (uintptr_t page = mem, i = numPages; i; page += PAGE_SIZE, i--)
+	{
+		MuiRemoveMapping(pHeap, page);
+	}
+	
+	return true;
+}
+
+// Stop using the user heap, switch to the basic kernel heap.
+void MuiResetHeap()
+{
+	g_pCurrentUserHeap = NULL;
+	
+	MmUsePageDirectory((uintptr_t)g_KernelPageDirectory - KERNEL_BASE_ADDRESS);
+}
 
 // Allows usage of the user heap. Changes CR3 to the user heap's page directory.
-void MuUseHeap (UserHeap* pHeap)
+void MuiUseHeap (UserHeap* pHeap)
 {
 	if (g_pCurrentUserHeap)
-		MuResetHeap();
+		MuiResetHeap();
 	
 	g_pCurrentUserHeap = pHeap;
 	
@@ -498,14 +532,19 @@ void MuUseHeap (UserHeap* pHeap)
 	MmUsePageDirectory((uintptr_t)pHeap->m_nPageDirectory);
 }
 
-// Stop using the user heap, switch to the basic kernel heap.
-void MuResetHeap()
+void MuUseHeap (UserHeap *pHeap)
 {
-	g_pCurrentUserHeap = NULL;
-	
-	MmUsePageDirectory((uintptr_t)g_KernelPageDirectory - KERNEL_BASE_ADDRESS);
+	cli;
+	MuiUseHeap(pHeap);
+	sti;
 }
 
+void MuResetHeap()
+{
+	cli;
+	MuiResetHeap();
+	sti;
+}
 
 // THREAD-SAFE WRAPPERS
 UserHeap* MuGetCurrentHeap()
@@ -599,4 +638,12 @@ bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address)
 	bool res = MuiRemoveMapping(pHeap, address);
 	LockFree (&pHeap->m_lock);
 	return res;
+}
+
+bool MuUnMap(UserHeap *pHeap, uintptr_t address, size_t numPages)
+{
+	LockAcquire (&pHeap->m_lock);
+	bool b = MuiUnMap (pHeap, address, numPages);
+	LockFree (&pHeap->m_lock);
+	return b;
 }
