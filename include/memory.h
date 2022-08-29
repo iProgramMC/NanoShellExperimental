@@ -43,25 +43,6 @@
 #include <lock.h>
 #include <idt.h>
 
-// Namespace guide:
-// * Mu = User Heaps
-// * Mh = Kernel Heap
-// * Mp = Physical memory manager
-// * Mr = Physical memory Reference counter manager
-// * Mm = Exposed programming interface
-
-typedef struct
-{
-	uint32_t m_refCounts[PAGE_SIZE / sizeof(uint32_t)];
-}
-RefCountTableLevel1;
-
-typedef struct
-{
-	RefCountTableLevel1* m_level1[PAGE_SIZE / sizeof(uint32_t)];
-}
-RefCountTableLevel0;
-
 typedef struct
 {
 	uint32_t m_pageEntries[PAGE_SIZE / 4];
@@ -82,51 +63,129 @@ typedef struct UserHeap
 }
 UserHeap;
 
-// Physical memory manager
-uint32_t MpFindFreeFrame();
-void MpSetFrame  (uint32_t frameAddr);
-void MpClearFrame(uint32_t frameAddr);
+// Exposed memory functions
+
+/**
+ * Initialize the physical memory manager.
+ */
 void MpInitialize(multiboot_info_t* pInfo);
-int  MpGetNumFreePages();
-uintptr_t MpRequestFrame(bool bIsKernelHeap);
 
-// Physical memory reference count manager
-uint32_t MrGetReferenceCount(uintptr_t page);
-uint32_t MrReferencePage(uintptr_t page);
-uint32_t MrUnreferencePage(uintptr_t page);
+/**
+ * Initialize the kernel heap.
+ */
+void MhInitialize();
 
-// Hardware
-void MmTlbInvalidate();
-void MmUsePageDirectory(uintptr_t pageDir);   //unsafe!! This is exposed just so that other memory code can use it.
-void MmInvalidateSinglePage(uintptr_t add);
-void MmOnPageFault(Registers* pRegs);
-int  MmGetNumPageFaults();
+/**
+ * Gets the number of page faults that have occurred since the system has started.
+ */
+int MmGetNumPageFaults();
 
-// Kernel heap
-void* MhAllocate(size_t size, uint32_t* pPhysOut);
-void* MhReAllocate(void *oldPtr, size_t newSize);
-void* MhAllocateSinglePage(uint32_t* pPhysOut);
-void  MhFreePage(void* pPage);
-void  MhFree(void* pPage);
-void  MhInitialize();
-uint32_t* MhGetPageEntry(uintptr_t address);
+/**
+ * Gets the number of free physical memory pages, which can be used to calculate
+ * the total amount of free memory available to the system.
+ */
+int MmGetNumPageFaults();
 
-// User heap manager
-void MuUseHeap (UserHeap* pHeap);
-void MuResetHeap();
-UserHeap* MuCreateHeap();
-UserHeap* MuGetCurrentHeap();
-UserHeap* MuCloneHeap(UserHeap* pHeapToClone);
-void MuKillHeap(UserHeap *pHeap);
-uint32_t* MuGetPageEntryAt(UserHeap* pHeap, uintptr_t address, bool bGeneratePageTable);
-bool MuCreateMapping(UserHeap *pHeap, uintptr_t address, uint32_t physAddress, bool bReadWrite);
-bool MuAreMappingParmsValid(uintptr_t start, size_t nPages);
-bool MuIsMappingFree(UserHeap *pHeap, uintptr_t start, size_t nPages);
-bool MuMapMemory(UserHeap *pHeap, size_t numPages, uint32_t* pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO);
-bool MuMapMemoryNonFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, void** pAddressOut, bool bReadWrite, bool bIsMMIO);
-bool MuMapMemoryFixedHint(UserHeap *pHeap, uintptr_t hint, size_t numPages, uint32_t *pPhysicalAddresses, bool bReadWrite, bool bAllowClobbering, bool bIsMMIO);
-void MuCreatePageTable(UserHeap *pHeap, int pageTable);
-void MuRemovePageTable(UserHeap *pHeap, int pageTable);
-bool MuRemoveMapping(UserHeap *pHeap, uintptr_t address);
+/**
+ * Maps a single page of physical memory to virtual memory.
+ * Use MmUnmapPhysMemFastUnsafe to unmap such memory.
+ *
+ * The result address may be NULL.
+ *
+ * MmMapPhysMemFastUnsafe by default returns a _read-write_ section, use MmMapPhysMemFastUnsafeRW
+ * to lock it as read-only.
+ */
+void *MmMapPhysMemFastRW(uint32_t page, bool bReadWrite);
+void *MmMapPhysMemFast  (uint32_t page);
+void  MmUnmapPhysMemFast(void*    pMem);
+
+/**
+ * Maps a contiguous block of physical memory.
+ *
+ * The result address will either be NULL or valid memory.
+ *
+ * MmMapPhysicalMemory by default returns a _read-only_ section, use MmMapPhysicalMemoryRW
+ * to be able to write to it.
+ */
+void* MmMapPhysicalMemoryRW(uint32_t phys_start, uint32_t phys_end, bool bReadWrite);
+void* MmMapPhysicalMemory  (uint32_t phys_start, uint32_t phys_end);
+
+/**
+ * Removes a physical memory mapping.
+ */
+void MmUnmapPhysicalMemory(void *pMem);
+
+/**
+ * Allocates a single page (4096 bytes).
+ * 
+ * This returns the address of the new page, or NULL if we ran out of memory.
+ * pPhysOut may be NULL or not, in the case where it's not, the physical address 
+ * of the page is returned.
+ */
+void* MmAllocateSinglePagePhyD(uint32_t* pPhysOut, const char* callFile, int callLine);
+#define MmAllocateSinglePagePhy(physOut) MmAllocateSinglePagePhyD(physOut, __FILE__, __LINE__)
+
+/**
+ * Allocates a single page (4096 bytes).
+ * 
+ * This returns the address of the new page, or NULL if we ran out of memory.
+ * Use MmAllocateSinglePagePhy if you also want the physical address of the page.
+ */
+void* MmAllocateSinglePageD(const char* callFile, int callLine);
+#define MmAllocateSinglePage() MmAllocateSinglePageD(__FILE__, __LINE__)
+
+/**
+ * Frees a single memory page. A NULL pointer is carefully ignored.
+ */
+void MmFreePage(void* pAddr);
+
+/**
+ * Allocates a memory range of size `size`.  Actually allocates several pages'
+ * worth of memory, so that the `size` always fits inside.
+ * 
+ * For example, MmAllocate(8000) behaves exactly the same as MmAllocate(4193) and MmAllocate(8192).
+ * 
+ * This kind of thing where we're allocating 1 byte's worth of memory but using several is not recommended,
+ * because the specification can always change this later so that memory accesses beyond the size throw an error.
+ *
+ * This returns the starting address of the memory range we obtained.  NULL can also be returned, if we have
+ * no more address space to actually allocate anything, or there are no more memory ranges available.
+ * 
+ * You must call MmFree or MmReAllocate with the *EXACT* address MmAllocate returned.
+ *
+ * See: MmFree, MmReAllocate
+ */
+void* MmAllocateD (size_t size, const char* callFile, int callLine);
+void* MmAllocateKD(size_t size, const char* callFile, int callLine);
+#define MmAllocate(size)  MmAllocateD (size, __FILE__, __LINE__)
+#define MmAllocateK(size) MmAllocateKD(size, __FILE__, __LINE__)
+
+/**
+ * Resizes a MmAllocate'd memory range to the new `size`.
+ * 
+ * You must call MmFree or MmReAllocate (again) with the *EXACT* address
+ * MmReAllocate returns.
+ *
+ * MmReAllocate offers no guarantee that the old pointer will still be valid.
+ * It may be (and is quite optimistic about optimizing it to be as such), however,
+ * if it sees no option, it will move the whole block.
+ */
+void* MmReAllocateD (void* old_ptr, size_t size, const char* callFile, int callLine);
+void* MmReAllocateKD(void* old_ptr, size_t size, const char* callFile, int callLine);
+#define MmReAllocate(old_ptr, size)  MmReAllocateD (old_ptr, size, __FILE__, __LINE__)
+#define MmReAllocateK(old_ptr, size) MmReAllocateKD(old_ptr, size, __FILE__, __LINE__)
+
+/**
+ * Frees a memory range allocated with MmAllocate. A NULL pointer is carefully ignored.
+ * 
+ * Note that the last 12 bits of pAddr are ignored, but the other 20 bits MUST represent
+ * the first page.
+ *
+ * So for example MmFree(MmAllocate(400)) behaves exactly the same as MmFree(MmAllocate(400)+500),
+ * but not as MmFree(MmAllocate(400)+4100).
+ */
+void MmFree (void* pAddr);
+void MmFreeK(void* pAddr);
+
 
 #endif//_MEMORY_H

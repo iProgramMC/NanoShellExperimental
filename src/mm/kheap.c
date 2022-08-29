@@ -9,8 +9,11 @@
 
 // Namespace: Mh (Memory manager, kernel Heap)
 
-#include <memory.h>
 #include <string.h>
+#include <memory.h>
+#include "memoryi.h"
+
+SafeLock g_KernelHeapLock;//TODO
 
 // Can allocate up to 256 MB of RAM.  No need for more I think,
 // but if there is a need, just increase this. Recommend a Power of 2
@@ -35,6 +38,8 @@ uint32_t* g_KernelPageDirectoryVirtual [PAGE_SIZE / sizeof(uint32_t)];
 
 uint32_t* MhGetPageEntry(uintptr_t address)
 {
+	KeVerifyInterruptsDisabled;
+	
 	if (address < KERNEL_HEAP_BASE || address >= KERNEL_BASE_ADDRESS)
 		return NULL;
 	
@@ -86,6 +91,8 @@ void MhInitialize()
 
 void* MhSetupPage(int index, uint32_t* pPhysOut)
 {
+	KeVerifyInterruptsDisabled;
+	
 	// if we require a physical address, allocate a physical page right away
 	if (pPhysOut)
 	{
@@ -114,8 +121,29 @@ void* MhSetupPage(int index, uint32_t* pPhysOut)
 	return (void*)returnAddr;
 }
 
+void* MhSetupPagePMem(int index, uintptr_t physIn, bool bReadWrite)
+{
+	KeVerifyInterruptsDisabled;
+	
+	// Mark this page entry as present, and return its address.
+	int permBits = PAGE_BIT_PRESENT | PAGE_BIT_USERSUPER | PAGE_BIT_MMIO;
+	if (bReadWrite)
+		permBits |= PAGE_BIT_READWRITE;
+	
+	g_KernelPageEntries[index] = (uint32_t)(physIn) | permBits;
+	
+	g_KernelHeapAllocSize[index] = 0;
+	
+	uintptr_t returnAddr = (KERNEL_HEAP_BASE + (index << 12));
+	MmInvalidateSinglePage(returnAddr);
+	
+	return (void*)returnAddr;
+}
+
 void* MhAllocateSinglePage(uint32_t* pPhysOut)
 {
+	KeVerifyInterruptsDisabled;
+	
 	// Find a free page frame.
 	for (int i = 0; i < C_MAX_KERNEL_HEAP_PAGE_ENTRIES; i++)
 	{
@@ -129,8 +157,11 @@ void* MhAllocateSinglePage(uint32_t* pPhysOut)
 	return NULL;
 }
 
+// This can be used to unmap physical memory. :)
 void MhFreePage(void* pPage)
 {
+	KeVerifyInterruptsDisabled;
+	
 	if (!pPage) return;
 	
 	// Turn this into an index into g_KernelPageEntries.
@@ -141,12 +172,14 @@ void MhFreePage(void* pPage)
 	// don't free a page if it was marked as demand-paged but was never actually demanded
 	if (g_KernelPageEntries[index] & PAGE_BIT_PRESENT)
 	{
-		// Get the old physical address. We want to remove the frame.
-		uint32_t physicalFrame = g_KernelPageEntries[index] & PAGE_BIT_ADDRESS_MASK;
-		
-		MpClearFrame(physicalFrame);
-		// not on kernel heap, so don't
-		//MrUnreferencePage(physicalFrame);
+		// MMIO needn't keep track of reference counts as it's always "there" in physical memory
+		if ((g_KernelPageEntries[index] & PAGE_BIT_MMIO) == 0)
+		{
+			// Get the old physical address. We want to remove the frame.
+			uint32_t physicalFrame = g_KernelPageEntries[index] & PAGE_BIT_ADDRESS_MASK;
+			
+			MpClearFrame(physicalFrame);
+		}
 	}
 	
 	// Ok. Free it now
@@ -158,6 +191,8 @@ void MhFreePage(void* pPage)
 
 void MhFree(void* pPage)
 {
+	KeVerifyInterruptsDisabled;
+	
 	if (!pPage) return;
 	
 	// Turn this into an index into g_KernelPageEntries.
@@ -178,6 +213,8 @@ void MhFree(void* pPage)
 }
 void* MhAllocate(size_t size, uint32_t* pPhysOut)
 {
+	KeVerifyInterruptsDisabled;
+	
 	if (size <= PAGE_SIZE)
 	{
 		return MhAllocateSinglePage(pPhysOut);
@@ -233,6 +270,8 @@ void* MhAllocate(size_t size, uint32_t* pPhysOut)
 }
 void* MhReAllocate(void *oldPtr, size_t newSize)
 {
+	KeVerifyInterruptsDisabled;
+	
 	// step 1: If the pointer is null, just allocate a new array of size `size`.
 	if (!oldPtr)
 		return MhAllocate(newSize, NULL);
@@ -322,3 +361,78 @@ void* MhReAllocate(void *oldPtr, size_t newSize)
 	
 	return newPtr;
 }
+
+// This works almost like a regular memory mapping, except for of course, the underlying pages
+void * MhMapPhysicalMemory(uintptr_t physMem, size_t numPages, bool bReadWrite)
+{
+	KeVerifyInterruptsDisabled;
+	
+	int nPages = (int)(numPages);
+	
+	if (nPages == 1)
+	{
+		// Faster single page version
+		// Find a free page frame.
+		for (int i = 0; i < C_MAX_KERNEL_HEAP_PAGE_ENTRIES; i++)
+		{
+			if (!(g_KernelPageEntries[i] & PAGE_BIT_PRESENT))
+			{
+				return MhSetupPagePMem(i, physMem, bReadWrite);
+			}
+		}
+		
+		SLogMsg("Out of kernel heap entries to map physical memory to");
+		return NULL;
+	}
+	else
+	{
+		//more than one page, take matters into our own hands:
+		
+		for (int i = 0; i < C_MAX_KERNEL_HEAP_PAGE_ENTRIES; i++)
+		{
+			// A non-allocated pageframe?
+			if (!(g_KernelPageEntries[i] & PAGE_BIT_PRESENT))
+			{
+				// Yes.  Are there at least nPages holes?
+				int jfinal = i + nPages;
+				for (int j = i; j < jfinal; j++)
+				{
+					//Are there any already taken pages before we reach the end.
+					if (g_KernelPageEntries[j] & PAGE_BIT_PRESENT)
+					{
+						//Yes.  This hole isn't large enough.
+						i = j;
+						goto _label_continue;
+					}
+				}
+				// Nope! We have space here!  Let's map all the pages, and return the address of the first one.
+				//LogMsg("Setting up page number %d", i);
+				void* pointer = MhSetupPagePMem(i, physMem, bReadWrite);
+				
+				// Not to forget, set the memory allocation size below:
+				g_KernelHeapAllocSize[i] = nPages - 1;
+				
+				for (int j = i + 1, k = 1; j < jfinal; j++, k++)
+				{
+					MhSetupPagePMem(j, physMem + PAGE_SIZE * k, bReadWrite);
+				}
+				
+				return pointer;
+			}
+		_label_continue:;
+		}
+		
+		//no continuous addressed pages are left. :^(
+		SLogMsg("Out of kernel heap entries to map physical memory to (tried to map %d pages)", numPages);
+		return NULL;
+	}
+}
+
+void MhUnMapPhysicalMemory(void *pAddr)
+{
+	KeVerifyInterruptsDisabled;
+	
+	//this'll do
+	MhFree(pAddr);
+}
+

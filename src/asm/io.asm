@@ -325,7 +325,14 @@ MmStartupStuff:
 	and ecx, 0xFFFFF000
 	mov dword [e_placement], ecx
 	ret
-	
+
+; uint32 KeGetEFlags()
+
+global KeGetEFlags
+KeGetEFlags:
+	pushf                  ; Push the eflags register
+	pop eax                ; Pop it into EAX
+	ret
 	
 section .bss
 

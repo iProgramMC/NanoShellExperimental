@@ -10,6 +10,7 @@
 // Namespace: Mp (Memory manager, Physical memory manager)
 
 #include <memory.h>
+#include "memoryi.h"
 
 extern uint32_t e_placement;
 

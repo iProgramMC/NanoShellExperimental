@@ -14,8 +14,13 @@ typedef unsigned uint;
 #define true 1
 
 #define hlt __asm__("hlt\n\t")  
-#define cli __asm__("cli\n\t")
-#define sti __asm__("sti\n\t")
+//#define cli __asm__("cli\n\t")
+//#define sti __asm__("sti\n\t")
+#define cli KeDisableInterruptsD(__FILE__, __LINE__)
+#define sti KeEnableInterruptsD (__FILE__, __LINE__)
+
+void KeDisableInterruptsD(const char * file, int line);
+void KeEnableInterruptsD (const char * file, int line);
 
 #define Version 10
 #define VersionString "V0.10"
@@ -34,10 +39,24 @@ extern unsigned short ReadPortW(unsigned short port);
 
 #define STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 
+#define UNUSED __attribute__((unused))
+
+// The function that's called when an assertion fails.
 bool OnAssertionFail (const char *pStr, const char *pFile, const char *pFunc, int nLine);
 #define ASSERT(condition) ((condition) || OnAssertionFail(#condition, __FILE__, __FUNCTION__, __LINE__))
 
-void KeStopSystem();
+// Stops the system immediately.
+void KeStopSystem(void);
+
+// Gets the contents of the EFLAGS register.
+uint32_t KeGetEFlags(void);
+
+// Checks if interrupts are disabled right now.
+bool KeCheckInterruptsDisabled(void);
+
+// Asserts if interrupts are disabled.
+void KeVerifyInterruptsDisabledD(const char * file, int line);
+#define KeVerifyInterruptsDisabled KeVerifyInterruptsDisabledD(__FILE__, __LINE__)
 
 #include <console.h>
 

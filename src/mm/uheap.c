@@ -10,8 +10,9 @@
 // Namespace: Mui (Memory manager, User heap, Internal)
 // Namespace: Mu (Memory manager, User heap, Exposed)
 
-#include <memory.h>
 #include <string.h>
+#include <memory.h>
+#include "memoryi.h"
 
 // THREADING: These functions are currently thread-unsafe. Please use the wrapper functions.
 UserHeap* g_pCurrentUserHeap;

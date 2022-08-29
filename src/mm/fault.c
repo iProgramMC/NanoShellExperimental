@@ -9,8 +9,9 @@
 
 // Namespace: Mf (Memory manager, page Fault)
 
-#include <memory.h>
 #include <string.h>
+#include <memory.h>
+#include "memoryi.h"
 
 //#define COW_DEBUG
 //#define DAI_DEBUG

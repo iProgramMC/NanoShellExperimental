@@ -6,25 +6,6 @@
 #include <elf.h>
 #include <multiboot.h>
 
-bool OnAssertionFail (const char *pStr, const char *pFile, const char *pFunc, int nLine)
-{
-	LogMsg("ASSERTION FAILED!");
-	LogMsg("%s", pStr);
-	LogMsg("At %s:%d [%s]", pFile, nLine, pFunc);
-	
-	LogMsg("System will now stop.");
-	KeStopSystem();
-	
-	return false;
-}
-
-void KeStopSystem()
-{
-	cli;
-	while (1)
-		hlt;
-}
-
 extern uint32_t e_placement;
 
 void FreeTypeThing()
@@ -42,6 +23,7 @@ void FreeTypeThing()
 	}
 }
 
+/*
 void MhTest()
 {
 	uint32_t *page1 = MhAllocateSinglePage(NULL);
@@ -72,6 +54,12 @@ void MhTest()
 	MhFree(page3);
 	MhFree(page4);
 	
+	// try out mapping some physical memory
+	void *pMem = MhMapPhysicalMemory( 0x00000000, 256 ); // map the entirety of the first megabyte somewhere
+	
+	*(uint16_t*)((uint8_t*)pMem + 0xB8000) = 0x0741;
+	
+	MhUnMapPhysicalMemory(pMem);
 }
 
 void MuTestWriteAll(uint8_t* pMem, size_t size)
@@ -109,7 +97,7 @@ void MuTest()
 	*((uint32_t*)0x12345678) = 0x13371337;
 	LogMsg("Wrote");
 	
-	//MuRemoveMapping (pHeap, 0x12345000, true);
+	MuRemoveMapping (pHeap, 0x12345000);
 	
 	//we can still read it from 0xC0400000
 	LogMsg("What we wrote: %x", *((uint32_t*)0xC0400678));
@@ -123,6 +111,7 @@ void MuTest()
 	//map some things for an attempt
 	MuMapMemory(pHeap, 423, NULL, &pMemory, true, false);
 	MuMapMemory(pHeap, 64, NULL, &pMemory, true, false);
+	MuUnMap(pHeap, (uintptr_t)pMemory, 64);
 	MuMapMemory(pHeap, 876, NULL, &pMemory, true, false);
 	
 	if (!MuMapMemory(pHeap, 8, NULL, &pMemory, true, false))
@@ -176,6 +165,45 @@ void MuTest()
 }
 
 void MrDebug();
+*/
+
+void MmTest()
+{
+	uint32_t *page1 = MmAllocateSinglePage();
+	uint32_t *page3 = MmAllocateSinglePage();
+	uint32_t *page2 = MmAllocate(3 * PAGE_SIZE);
+	
+	page1[5] = 0x13371337;
+	page2[2 * PAGE_SIZE	/4 + 7] = 0xbeefbeef;
+	
+	LogMsg("Pages 1, 2, 3: %p %p %p. Page1[5]=%x. Page2[7]=%x. Page2[2*PAGE_SIZE+7]=%x", page1, page2, page3, page1[5], page2[7], page2[2 * PAGE_SIZE/4	 + 7]);
+	
+	page2 = MmReAllocate(page2, 6*PAGE_SIZE);
+	page2[6000] = 0x12345678;
+	
+	LogMsg("Reallocated, Page2: %p. Page2[2*PAGE_SIZE/4+7]=%x. Page2[6000]=%x.",page2,page2[2*PAGE_SIZE/4+7],page2[6000]);
+	
+	MmFree(page2); page2 = NULL;
+	
+	uint32_t *page4 = MmAllocateSinglePage();
+	
+	LogMsg("Page 4: %p. Page 2: %p", page4, page2);
+	
+	page4[1023] = 0xFFCC9966;
+	LogMsg("Page4[1023]=%x.", page4[1023]);
+	
+	MmFree(page1);
+	MmFree(page2);
+	MmFree(page3);
+	MmFree(page4);
+	
+	// try out mapping some physical memory
+	void *pMem = MmMapPhysicalMemoryRW(0x000000, 0x100000, true); // map the entirety of the first megabyte somewhere
+	
+	*(uint16_t*)((uint8_t*)pMem + 0xB8000) = 0x0741;
+	
+	MmUnmapPhysicalMemory(pMem);
+}
 
 extern int g_numPagesAvailable;
 void MmInitializePMM(multiboot_info_t* pInfo);
@@ -213,9 +241,9 @@ void KeStartupSystem (unsigned long magic, unsigned long mbaddr)
 	
 	LogMsg("There are %d pages available to the system, %d of which are still free.", g_numPagesAvailable, MpGetNumFreePages());
 	
-	MhTest();
-	
-	MuTest();
+	//MhTest();
+	//MuTest();
+	MmTest();
 	
 	int nPagesFreeNow = MpGetNumFreePages();
 	LogMsg("There are now %d out of %d pages available to the system.", nPagesFreeNow, g_numPagesAvailable);
@@ -226,7 +254,7 @@ void KeStartupSystem (unsigned long magic, unsigned long mbaddr)
 		LogMsg("Uh oh! There's a leak somewhere! Deal with it iProgramInCpp!");
 	}
 	
-	MrDebug();
+	//MrDebug();
 	
 	FreeTypeThing();
 	

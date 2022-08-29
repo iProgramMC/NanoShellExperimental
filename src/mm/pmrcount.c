@@ -9,8 +9,12 @@
 
 // This module deals with storing reference counts to physical pages.
 
-#include <memory.h> // I'm not sure we need all that crap anyway, just include it for the structure definition we'll be using
 #include <string.h>
+
+// I'm not sure we need all that crap anyway, just include it for the structure definition we'll be using
+//#include <memory.h>
+
+#include "memoryi.h"
 
 RefCountTableLevel0 g_root;
 
