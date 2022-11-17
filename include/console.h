@@ -39,5 +39,6 @@ void SLogMsgNoCr (const char* fmt, ...);
 void LogHexDumpData (void* pData, int size);
 void ResetConsole();
 void SetConsole(Console* pConsole);
+void CoGetString(char* buffer, int max_size);
 
 #endif//_CONSOLE_H

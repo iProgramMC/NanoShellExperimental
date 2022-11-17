@@ -18,7 +18,7 @@ This software is licensed under the GNU General Public License version 3.
 - [x] **Port to the actual NanoShell operating system itself**
 
 ### File System Code
-- [ ] A really basic shell which allows for interaction with the OS and potential file systems
+- [X] A really basic shell which allows for interaction with the OS and potential file systems
 - [ ] The VFS skeleton
 - [ ] Init ram disk (use Tar like NanoShell proper)
 - [ ] Read the EXT2 super block

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <print.h>
 #include <console.h>
+#include <keyboard.h>
 
 //note: important system calls are preceded by cli and succeeded by sti
 
@@ -232,4 +233,43 @@ void LogHexDumpData (void* pData, int size) {
 		}
 		LogMsg("");
 	}
+}
+
+char CoGetChar()
+{
+	return KbWaitForKeyAndGet();
+}
+
+void CoGetString(char* buffer, int max_size)
+{
+	int index = 0, max_length = max_size - 1;
+	//index represents where the next character we type would go
+	while (index < max_length)
+	{
+		//! has to stall
+		char k = CoGetChar();
+		if (k == '\n')
+		{
+			//return:
+			LogMsgNoCr("%c", k);
+			buffer[index++] = 0;
+			return;
+		}
+		else if (k == '\b')
+		{
+			if (index > 0)
+			{
+				LogMsgNoCr("%c", k);
+				index--;
+				buffer[index] = 0;
+			}
+		}
+		else
+		{
+			buffer[index++] = k;
+			LogMsgNoCr("%c", k);
+		}
+	}
+	LogMsg("");
+	buffer[index] = 0;
 }

@@ -25,8 +25,18 @@ void strtoupper(char* as);
 int strcmp(const char* as, const char* bs);
 void strcat(char* dest, char* after);
 void fmemcpy32 (void* restrict dest, const void* restrict src, size_t size);
+char* strchr (char* stringToSearch, const char characterToSearchFor);
 
 //requires 4 byte aligned size.
 void ZeroMemory (void* bufptr1, size_t size);
+
+//BetterStrTok: https://github.com/iProgramMC/BetterStrTok
+typedef struct {
+    bool m_bInitted;
+    char*m_pContinuation;
+    char*m_pReturnValue;
+} TokenState;
+
+char* Tokenize (TokenState* pState, char* pString, char* separator);
 
 #endif//_STRING_H

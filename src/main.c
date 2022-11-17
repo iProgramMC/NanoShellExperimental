@@ -8,6 +8,7 @@
 
 extern uint32_t e_placement;
 
+void ShellRun();
 void FreeTypeThing()
 {
 	LogMsgNoCr("\nType something! >");
@@ -256,7 +257,8 @@ void KeStartupSystem (unsigned long magic, unsigned long mbaddr)
 	
 	//MrDebug();
 	
-	FreeTypeThing();
+	//FreeTypeThing();
+	ShellRun();
 	
 	KeStopSystem();
 }
