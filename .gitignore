@@ -7,6 +7,7 @@ tools
 #files I don't want added because they're too big
 vdisk.vdi
 vdisk*.vdi
+e2d*.vdi
 
 todo.txt
 todo1.txt

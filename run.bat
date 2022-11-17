@@ -16,6 +16,7 @@ qemu-system-i386.exe -no-reboot -no-shutdown    ^
 -debugcon stdio                                 ^
 -display sdl                                    ^
 -accel tcg                                      ^
+-hda %nspath%\e2disk.vdi                        ^
 -monitor telnet:127.0.0.1:55555,server,nowait
 
 : -s -S                                         -- for debugging with GDB
