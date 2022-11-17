@@ -15,7 +15,27 @@ This software is licensed under the GNU General Public License version 3.
 - [x] Demand paging (use faults to generate pages on the fly rather than generating them instantly)
 - [x] Copy-on-write when cloning (will be useful for `fork` later)
 - [x] Unmapping of memory areas
-- [x] Port to the actual NanoShell operating system itself
+- [x] **Port to the actual NanoShell operating system itself**
+
+### File System Code
+- [ ] A really basic shell which allows for interaction with the OS and potential file systems
+- [ ] The VFS skeleton
+- [ ] Init ram disk (use Tar like NanoShell proper)
+- [ ] Read the EXT2 super block
+- [ ] EXT2 read files from root.
+- [ ] EXT2 read files inside subdirectories.
+- [ ] EXT2 write support
+- [ ] EXT2 make dir support
+- [ ] EXT2 unlink support
+- [ ] EXT2 hardlink support
+- [ ] FAT32 Skeleton
+- [ ] FAT32 read files from root.
+- [ ] FAT32 read files inside subdirectories.
+- [ ] FAT32 write support
+- [ ] FAT32 make dir support
+- [ ] FAT32 unlink support
+- [ ] FAT32 hardlink support
+- [ ] Port to NanoShell proper
 
 ## Build instructions
 
