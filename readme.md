@@ -14,8 +14,8 @@ This software is licensed under the GNU General Public License version 3.
 - [x] Allow mapping of any memory anywhere 
 - [x] Demand paging (use faults to generate pages on the fly rather than generating them instantly)
 - [x] Copy-on-write when cloning (will be useful for `fork` later)
-- [ ] Unmapping of memory areas
-- [ ] Port to the actual NanoShell operating system itself
+- [x] Unmapping of memory areas
+- [x] Port to the actual NanoShell operating system itself
 
 ## Build instructions
 
