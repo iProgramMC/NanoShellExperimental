@@ -2,6 +2,12 @@
 #include <string.h>
 #include <vga.h>
 
+#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFull
+	#define IS_64_BIT true
+#else
+	#define IS_64_BIT false
+#endif
+
 void uns_to_str(uint64_t num, char* str, int paddingInfo, char paddingChar)
 {
 	// print the actual digits themselves
@@ -285,7 +291,7 @@ size_t vsnprintf(char* buf, size_t sz, const char* fmt, va_list args)
 				// Format a uint32_t as lowercase/uppercase hexadecimal
 				case 'x':
 				case 'X':
-#if SIZE_MAX == 0xFFFFFFFFu //todo: a proper way
+#if !IS_64_BIT
 				case 'p': case 'P':
 #endif
 				{
@@ -309,7 +315,7 @@ size_t vsnprintf(char* buf, size_t sz, const char* fmt, va_list args)
 				// Format a uint64_t as lowercase/uppercase hexadecimal
 				case 'q':
 				case 'Q':
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFull //todo: a proper way
+#if IS_64_BIT
 				case 'p': case 'P':
 #endif
 				{
@@ -317,7 +323,7 @@ size_t vsnprintf(char* buf, size_t sz, const char* fmt, va_list args)
 					if (m == 'Q' || m == 'P')
 						charset = "0123456789ABCDEF";
 
-					uint32_t p = va_arg(args, uint32_t);
+					uint64_t p = va_arg(args, uint64_t);
 
 					for (uint64_t mask = 0xF000000000000000ULL, bitnum = 60; mask; mask >>= 4, bitnum -= 4)
 					{

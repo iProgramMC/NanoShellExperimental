@@ -1,7 +1,6 @@
 
 section .data
-	
-global g_kernelPageDirectory
+
 global e_placement
 global e_frameBitsetSize
 global e_frameBitsetVirt
