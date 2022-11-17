@@ -4,6 +4,7 @@
 #include <idt.h>
 #include <keyboard.h>
 #include <elf.h>
+#include <storabs.h>
 #include <multiboot.h>
 
 extern uint32_t e_placement;
@@ -253,6 +254,29 @@ void KeStartupSystem (unsigned long magic, unsigned long mbaddr)
 	if (nPagesFreeNow != g_numPagesAvailable)
 	{
 		LogMsg("Uh oh! There's a leak somewhere! Deal with it iProgramInCpp!");
+	}
+	
+	// Initialize IDE
+	LogMsgNoCr("Initializing IDE...");
+	StIdeInit();
+	LogMsg("  OK");
+	
+	uint8_t data[512];
+	DriveStatus ds = StDeviceRead(0, data, 0x00, 1);
+	if (ds == DEVERR_SUCCESS)
+	{
+		SLogMsgNoCr("Data Dump:");
+		for (int i = 0; i < 512; i++)
+		{
+			if (i % 16 == 0)
+				SLogMsg("");
+			SLogMsgNoCr("%b ", data[i]);
+		}
+		SLogMsg("");
+	}
+	else
+	{
+		LogMsg("Failed to read sector 0 from drive 0! Error Code: %d", ds);
 	}
 	
 	//MrDebug();

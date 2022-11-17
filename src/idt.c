@@ -63,11 +63,17 @@ void KeTimerInit()
 	WritePort(0x40, (uint8_t)( pit_frequency       & 0xff));
 	WritePort(0x40, (uint8_t)((pit_frequency >> 8) & 0xff));
 }
+static int s_ticks = 0;
 void IrqTimer()
 {
+	s_ticks++;
 	//LogMsg("Timer!");
 	WritePort(0x20, 0x20);
 	WritePort(0xA0, 0x20);
+}
+int GetTickCount()
+{
+	return s_ticks;
 }
 void IsrSoftware()
 {
